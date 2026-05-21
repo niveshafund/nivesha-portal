@@ -1,4 +1,4 @@
-import { FUND, COMPANIES, fmtCurrency, fmtCurrencyFull, moicColor, irrColor, coColor, coInitials } from '@/lib/data';
+import { FUND, COMPANIES, fmt, fmtFull, moicColor, irrColor, coColor, coInitials } from '@/lib/data';
 
 export default function DashboardPage() {
   const topCompanies = [...COMPANIES]
@@ -23,8 +23,8 @@ export default function DashboardPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-5 gap-3 mb-5">
         {[
-          { label: 'Invested Capital',  value: fmtCurrency(FUND.invested),      change: '↑ 5.4%',  up: true },
-          { label: 'Total Fund Value',  value: fmtCurrency(FUND.nav),           change: '↑ 8.2%',  up: true },
+          { label: 'Invested Capital',  value: fmt(FUND.invested),      change: '↑ 5.4%',  up: true },
+          { label: 'Total Fund Value',  value: fmt(FUND.nav),           change: '↑ 8.2%',  up: true },
           { label: 'IRR',               value: `${FUND.irr}%`,                   change: '↑ 3.1%',  up: true },
           { label: 'MOIC',              value: `${FUND.moic}x`,                  change: '↑ 0.3x',  up: true },
           { label: 'DPI',               value: `${FUND.dpi.toFixed(2)}x`,        change: 'No distributions', up: false },
@@ -88,11 +88,11 @@ export default function DashboardPage() {
         <div className="bg-white border border-[#e8e6df] rounded-xl p-5">
           <div className="text-[13.5px] font-semibold mb-3">Fund Summary</div>
           {[
-            { label: 'Committed Capital', value: fmtCurrencyFull(FUND.committed) },
-            { label: 'Invested Capital',  value: fmtCurrencyFull(FUND.invested) },
-            { label: 'Uncalled Capital',  value: fmtCurrencyFull(FUND.uncalled) },
+            { label: 'Committed Capital', value: fmtFull(FUND.committed) },
+            { label: 'Invested Capital',  value: fmtFull(FUND.invested) },
+            { label: 'Uncalled Capital',  value: fmtFull(FUND.uncalled) },
             { label: 'Distributions',     value: '$0' },
-            { label: 'Portfolio Value (NAV)', value: fmtCurrencyFull(FUND.nav) },
+            { label: 'Portfolio Value (NAV)', value: fmtFull(FUND.nav) },
           ].map((row) => (
             <div key={row.label} className="flex justify-between items-center py-2 border-b border-[#e8e6df] text-[12.5px]">
               <span>{row.label}</span>
@@ -101,7 +101,7 @@ export default function DashboardPage() {
           ))}
           <div className="flex justify-between items-center py-2 text-[12.5px] font-semibold">
             <span>Total Value</span>
-            <span className="font-mono text-[12px]">{fmtCurrencyFull(FUND.nav)}</span>
+            <span className="font-mono text-[12px]">{fmtFull(FUND.nav)}</span>
           </div>
           <div className="text-[10px] text-[#9b9890] text-right mb-2.5">NAV + Distributions</div>
           <div className="flex gap-3 pt-2.5 border-t border-[#e8e6df]">
@@ -187,9 +187,9 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtCurrency(co.invested)}</td>
-                  <td className="px-3 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtCurrency(co.unrealised)}</td>
-                  <td className="px-3 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtCurrency(co.unrealised)}</td>
+                  <td className="px-3 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmt(co.invested)}</td>
+                  <td className="px-3 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmt(co.unrealised)}</td>
+                  <td className="px-3 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmt(co.unrealised)}</td>
                   <td className={`px-3 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${moicColor(co.moic)}`}>
                     {co.moic > 0 ? `${co.moic.toFixed(2)}x` : '—'}
                   </td>
