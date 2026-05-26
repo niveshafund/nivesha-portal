@@ -17,6 +17,7 @@ export type Fund = {
   dpi: number;
   managementFee: number;
   carriedInterest: number;
+  targetSize?: number;   // GP's fundraising target
   status: FundStatus;
   focus: string[];
   lpCount: number;
@@ -81,6 +82,7 @@ export const FUNDS: Fund[] = [
     dpi: 0.0,
     managementFee: 2.0,
     carriedInterest: 20,
+    targetSize: 10000000,
     status: 'Active',
     focus: ['Healthcare Tech', 'Fintech', 'SpaceTech', 'B2B SaaS'],
     lpCount: 50,
@@ -172,8 +174,8 @@ export const fmt = (n: number): string => {
   if (n >= 1_000)     return `$${(n / 1_000).toFixed(0)}k`;
   return `$${n.toLocaleString()}`;
 };
-
-export const fmtFull = (n: number): string => `$${n.toLocaleString()}`;
+export const fmtFull = (n: number | undefined | null): string => 
+  n == null ? '$0' : `$${n.toLocaleString()}`;
 export const fmtPct  = (n: number): string => `${n.toFixed(1)}%`;
 
 export const moicColor = (m: number): string => {

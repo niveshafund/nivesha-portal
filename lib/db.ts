@@ -1,0 +1,503 @@
+import { supabase } from './supabase';
+
+// ─── TYPES ───────────────────────────────────────────────────
+
+export type DbFund = {
+  id: string;
+  name: string;
+  vintage: number;
+  target_size?: number;
+  committed: number;
+  called: number;
+  invested: number;
+  nav: number;
+  distributions: number;
+  moic: number;
+  irr: number;
+  dpi: number;
+  management_fee: number;
+  carried_interest: number;
+  hurdle_rate: number;
+  fund_life: number;
+  currency: string;
+  status: 'Active' | 'Fundraising' | 'Closed';
+  focus: string[];
+  description?: string;
+  start_date?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbLP = {
+  id: string;
+  fund_id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  type: 'Individual' | 'Institution' | 'Family Office' | 'Corporate';
+  address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
+  commitment: number;
+  called: number;
+  distributions: number;
+  ownership_pct: number;
+  status: 'Active' | 'Inactive' | 'Pending';
+  join_date?: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbLPTransaction = {
+  id: string;
+  lp_id: string;
+  fund_id: string;
+  date: string;
+  amount: number;
+  type: 'Capital Call' | 'Distribution' | 'Return of Capital';
+  notes?: string;
+  created_at: string;
+};
+
+export type DbCompany = {
+  id: string;
+  fund_id: string;
+  name: string;
+  sector?: string;
+  stage?: string;
+  website?: string;
+  status: 'Active' | 'Exited' | 'Written Off';
+  entity_type?: string;
+  jurisdiction?: string;
+  us_state?: string;
+  country?: string;
+  contact_name?: string;
+  contact_email?: string;
+  security_type?: string;
+  round?: string;
+  valuation?: number;
+  valuation_type?: string;
+  investment_date?: string;
+  headline?: string;
+  about?: string;
+  invested: number;
+  unrealised: number;
+  distributions: number;
+  moic: number;
+  irr: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbTransaction = {
+  id: string;
+  fund_id: string;
+  company_id?: string;
+  company_name: string;
+  date: string;
+  type: 'Investment' | 'Distribution' | 'Exit' | 'Fee' | 'Other';
+  amount: number;
+  instrument: 'Equity' | 'Convertible Note' | 'SAFE' | 'Preferred Stock' | 'Other';
+  description?: string;
+  notes?: string;
+  created_at: string;
+};
+
+export type DbExpense = {
+  id: string;
+  fund_id: string;
+  date: string;
+  quarter: string;
+  quarter_end: string;
+  type: 'Management Fee' | 'Legal' | 'Audit' | 'Admin' | 'Other';
+  amount: number;
+  description?: string;
+  notes?: string;
+  created_at: string;
+};
+
+export type DbValuation = {
+  id: string;
+  company_id: string;
+  fund_id: string;
+  quarter: string;
+  quarter_end: string;
+  value: number;
+  moic: number;
+  irr: number;
+  round?: string;
+  notes?: string;
+  created_at: string;
+};
+
+export type DbCompanyUpdate = {
+  id: string;
+  company_id: string;
+  date: string;
+  title: string;
+  body?: string;
+  is_public: boolean;
+  created_by?: string;
+  created_at: string;
+};
+
+// ─── FUNDS ───────────────────────────────────────────────────
+
+export async function getFunds(): Promise<DbFund[]> {
+  const { data, error } = await supabase
+    .from('funds')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getFundById(id: string): Promise<DbFund | null> {
+  const { data, error } = await supabase
+    .from('funds')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) return null;
+  return data;
+}
+
+export async function createFund(fund: Omit<DbFund, 'id' | 'created_at' | 'updated_at'>): Promise<DbFund> {
+  const { data, error } = await supabase
+    .from('funds')
+    .insert(fund)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateFund(id: string, updates: Partial<DbFund>): Promise<DbFund> {
+  const { data, error } = await supabase
+    .from('funds')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteFund(id: string): Promise<void> {
+  const { error } = await supabase.from('funds').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ─── LPs ─────────────────────────────────────────────────────
+
+export async function getLPsByFund(fundId: string): Promise<DbLP[]> {
+  const { data, error } = await supabase
+    .from('lps')
+    .select('*')
+    .eq('fund_id', fundId)
+    .order('name');
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getLPById(id: string): Promise<DbLP | null> {
+  const { data, error } = await supabase
+    .from('lps')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) return null;
+  return data;
+}
+
+export async function createLP(lp: Omit<DbLP, 'id' | 'created_at' | 'updated_at'>): Promise<DbLP> {
+  const { data, error } = await supabase
+    .from('lps')
+    .insert(lp)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateLP(id: string, updates: Partial<DbLP>): Promise<DbLP> {
+  const { data, error } = await supabase
+    .from('lps')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// ─── LP TRANSACTIONS ─────────────────────────────────────────
+
+export async function getLPTransactions(lpId: string): Promise<DbLPTransaction[]> {
+  const { data, error } = await supabase
+    .from('lp_transactions')
+    .select('*')
+    .eq('lp_id', lpId)
+    .order('date', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getLPTransactionsByFund(fundId: string): Promise<DbLPTransaction[]> {
+  const { data, error } = await supabase
+    .from('lp_transactions')
+    .select('*')
+    .eq('fund_id', fundId)
+    .order('date', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function addLPTransaction(
+  txn: Omit<DbLPTransaction, 'id' | 'created_at'>
+): Promise<DbLPTransaction> {
+  const { data, error } = await supabase
+    .from('lp_transactions')
+    .insert(txn)
+    .select()
+    .single();
+  if (error) throw error;
+
+  // Update LP called total
+  const allTxns = await getLPTransactions(txn.lp_id);
+  const totalCalled = allTxns.reduce((s, t) => s + t.amount, 0);
+  await updateLP(txn.lp_id, { called: totalCalled });
+
+  return data;
+}
+
+export async function deleteLPTransaction(id: string, lpId: string): Promise<void> {
+  const { error } = await supabase.from('lp_transactions').delete().eq('id', id);
+  if (error) throw error;
+  // Recalculate LP called total
+  const allTxns = await getLPTransactions(lpId);
+  const totalCalled = allTxns.reduce((s, t) => s + t.amount, 0);
+  await updateLP(lpId, { called: totalCalled });
+}
+
+// ─── COMPANIES ───────────────────────────────────────────────
+
+export async function getCompaniesByFund(fundId: string): Promise<DbCompany[]> {
+  const { data, error } = await supabase
+    .from('companies')
+    .select('*')
+    .eq('fund_id', fundId)
+    .order('name');
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getCompanyById(id: string): Promise<DbCompany | null> {
+  const { data, error } = await supabase
+    .from('companies')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) return null;
+  return data;
+}
+
+export async function createCompany(
+  company: Omit<DbCompany, 'id' | 'created_at' | 'updated_at'>
+): Promise<DbCompany> {
+  const { data, error } = await supabase
+    .from('companies')
+    .insert(company)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateCompany(id: string, updates: Partial<DbCompany>): Promise<DbCompany> {
+  const { data, error } = await supabase
+    .from('companies')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// ─── TRANSACTIONS ─────────────────────────────────────────────
+
+export async function getTransactionsByFund(fundId: string): Promise<DbTransaction[]> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('fund_id', fundId)
+    .order('date', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getTransactionsByCompany(companyId: string): Promise<DbTransaction[]> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('company_id', companyId)
+    .order('date', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function createTransaction(
+  txn: Omit<DbTransaction, 'id' | 'created_at'>
+): Promise<DbTransaction> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .insert(txn)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateTransaction(
+  id: string,
+  updates: Partial<DbTransaction>
+): Promise<DbTransaction> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteTransaction(id: string): Promise<void> {
+  const { error } = await supabase.from('transactions').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ─── EXPENSES ────────────────────────────────────────────────
+
+export async function getExpensesByFund(fundId: string): Promise<DbExpense[]> {
+  const { data, error } = await supabase
+    .from('expenses')
+    .select('*')
+    .eq('fund_id', fundId)
+    .order('date', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function createExpense(
+  expense: Omit<DbExpense, 'id' | 'created_at'>
+): Promise<DbExpense> {
+  const { data, error } = await supabase
+    .from('expenses')
+    .insert(expense)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateExpense(id: string, updates: Partial<DbExpense>): Promise<DbExpense> {
+  const { data, error } = await supabase
+    .from('expenses')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteExpense(id: string): Promise<void> {
+  const { error } = await supabase.from('expenses').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ─── VALUATIONS ──────────────────────────────────────────────
+
+export async function getValuationsByCompany(companyId: string): Promise<DbValuation[]> {
+  const { data, error } = await supabase
+    .from('valuations')
+    .select('*')
+    .eq('company_id', companyId)
+    .order('quarter_end', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getValuationsByFund(fundId: string): Promise<DbValuation[]> {
+  const { data, error } = await supabase
+    .from('valuations')
+    .select('*')
+    .eq('fund_id', fundId)
+    .order('quarter_end', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function upsertValuation(
+  valuation: Omit<DbValuation, 'id' | 'created_at'>
+): Promise<DbValuation> {
+  const { data, error } = await supabase
+    .from('valuations')
+    .upsert(valuation, { onConflict: 'company_id,quarter' })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// ─── COMPANY UPDATES ─────────────────────────────────────────
+
+export async function getCompanyUpdates(companyId: string): Promise<DbCompanyUpdate[]> {
+  const { data, error } = await supabase
+    .from('company_updates')
+    .select('*')
+    .eq('company_id', companyId)
+    .order('date', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function createCompanyUpdate(
+  update: Omit<DbCompanyUpdate, 'id' | 'created_at'>
+): Promise<DbCompanyUpdate> {
+  const { data, error } = await supabase
+    .from('company_updates')
+    .insert(update)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteCompanyUpdate(id: string): Promise<void> {
+  const { error } = await supabase.from('company_updates').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ─── HELPERS ─────────────────────────────────────────────────
+
+// Recalculate fund totals from transactions and LP data
+export async function recalculateFundMetrics(fundId: string): Promise<void> {
+  const [txns, lps] = await Promise.all([
+    getTransactionsByFund(fundId),
+    getLPsByFund(fundId),
+  ]);
+
+  const invested     = txns.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
+  const distributions = txns.filter(t => t.type === 'Distribution').reduce((s, t) => s + t.amount, 0);
+  const committed    = lps.reduce((s, lp) => s + lp.commitment, 0);
+  const called       = lps.reduce((s, lp) => s + lp.called, 0);
+
+  await updateFund(fundId, { invested, distributions, committed, called });
+}
