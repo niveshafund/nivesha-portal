@@ -160,9 +160,6 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
         investment_date: form.investmentDate || undefined,
         headline:        form.headline || undefined,
         about:           form.about    || undefined,
-        notes:           form.securityType === 'SAFE'
-          ? `SAFE: ${form.safeType}${form.discount ? ` | Discount: ${form.discount}%` : ''}`
-          : undefined,
         invested:        Number(form.amount),
         unrealised:      form.valuation ? Number(form.valuation) : Number(form.amount),
         distributions:   0,

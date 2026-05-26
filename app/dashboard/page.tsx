@@ -90,7 +90,7 @@ export default function DashboardPage() {
           {[
             { label: 'Committed Capital', value: fmtFull(FUND.committed) },
             { label: 'Invested Capital',  value: fmtFull(FUND.invested) },
-            { label: 'Uncalled Capital',  value: fmtFull(FUND.uncalled) },
+            { label: 'Uncalled Capital',  value: fmtFull(FUND.committed - FUND.called) },
             { label: 'Distributions',     value: '$0' },
             { label: 'Portfolio Value (NAV)', value: fmtFull(FUND.nav) },
           ].map((row) => (
