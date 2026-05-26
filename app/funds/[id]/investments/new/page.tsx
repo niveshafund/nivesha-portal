@@ -89,18 +89,17 @@ type Errors = Partial<Record<keyof Form, string>>;
 // Build investment terms string for the Description column
 function buildInvestmentTerms(form: any): string | undefined {
   const parts: string[] = [];
-  if (form.securityType) {
-    if (form.securityType === 'SAFE') {
-      parts.push(`SAFE ${form.safeType || ''}`.trim());
-      if (form.discount) parts.push(`${form.discount}% discount`);
-    } else {
-      parts.push(form.securityType);
-    }
+  // For SAFE: show structure and discount (skip "SAFE" prefix — instrument column has it)
+  if (form.securityType === 'SAFE') {
+    if (form.safeType) parts.push(form.safeType);
+    if (form.discount) parts.push(`${form.discount}% discount`);
   }
+  // Valuation
   if (form.valuation) {
     const val = Number(form.valuation);
-    parts.push(`${form.valuationType} valuation: $${val.toLocaleString()}`);
+    parts.push(`${form.valuationType} valuation cap: $${val.toLocaleString()}`);
   }
+  // Round
   if (form.round) parts.push(form.round);
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }
@@ -160,6 +159,9 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
         investment_date: form.investmentDate || undefined,
         headline:        form.headline || undefined,
         about:           form.about    || undefined,
+        notes:           form.securityType === 'SAFE'
+          ? `SAFE: ${form.safeType}${form.discount ? ` | Discount: ${form.discount}%` : ''}`
+          : undefined,
         invested:        Number(form.amount),
         unrealised:      form.valuation ? Number(form.valuation) : Number(form.amount),
         distributions:   0,

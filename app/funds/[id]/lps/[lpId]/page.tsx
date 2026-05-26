@@ -2,14 +2,18 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getLPById, updateLP, getLPTransactions, addLPTransaction, deleteLPTransaction, DbLP, DbLPTransaction } from '@/lib/db';
+import { useRouter } from 'next/navigation';
+import { getLPById, updateLP, deleteLP, getLPTransactions, addLPTransaction, deleteLPTransaction, DbLP, DbLPTransaction } from '@/lib/db';
 
 const fmtFull = (n: number | undefined | null) => n == null ? '$0' : `$${n.toLocaleString()}`;
 const fmtPct  = (n: number) => `${n.toFixed(2)}%`;
 
 export default function LPDetailPage({ params }: { params: Promise<{ id: string; lpId: string }> }) {
   const { id: fundId, lpId } = React.use(params);
+  const router = useRouter();
   const [lp, setLP] = useState<DbLP | null>(null);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [txns, setTxns] = useState<DbLPTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -61,6 +65,47 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
       setLoading(false);
     }
   }
+
+  const handleDelete = async () => {
+    if (txns.length > 0) return; // safety check
+    setDeleting(true);
+    try {
+      await deleteLP(lpId);
+      router.push(`/funds/${fundId}`);
+    } catch (err: any) {
+      alert('Failed to delete LP: ' + err.message);
+      setDeleting(false);
+    }
+  };
+
+  const handleExport = () => {
+    if (!lp) return;
+    // Build CSV matching the LP import template format
+    const headers = [
+      'Investor Name*','Investing As','Commitment Amount*','Currency*',
+      'Called Capital','Distributions','Commitment Date','Email','Phone',
+      'Address Line 1','Address Line 2','City','State','ZIP Code','Country',
+      'Contact Name','Notes'
+    ];
+    const row = [
+      lp.name, '',
+      lp.commitment, 'USD',
+      lp.called, lp.distributions,
+      lp.join_date || '',
+      lp.email || '', lp.phone || '',
+      lp.address_line1 || '', lp.address_line2 || '',
+      lp.city || '', lp.state || '', lp.zip || '', lp.country || '',
+      '', lp.notes || ''
+    ];
+    const csv = [headers.join(','), row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `${lp.name.replace(/[^a-z0-9]/gi,'_')}_LP.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const set = (k: string) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -181,10 +226,16 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
             </div>
           </div>
         </div>
-        <button onClick={() => setEditing(!editing)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
-          {editing ? '✕ Cancel Edit' : '✏️ Edit LP'}
-        </button>
+        <div className="flex gap-2">
+          <button onClick={handleExport}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+            ↓ Export
+          </button>
+          <button onClick={() => setEditing(!editing)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+            {editing ? '✕ Cancel Edit' : '✏️ Edit LP'}
+          </button>
+        </div>
       </div>
 
       {saveError && (
@@ -395,6 +446,46 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
             </>
           )}
         </div>
+      </div>
+      {/* Delete LP section */}
+      <div className="bg-white border border-red-200 rounded-xl p-6 mt-5">
+        <h2 className="text-[15px] font-semibold text-red-600 mb-1">Danger Zone</h2>
+        <p className="text-[12px] text-[#9b9890] mb-4">
+          Delete this LP record. Only possible if no capital calls have been recorded.
+        </p>
+        {txns.length > 0 ? (
+          <div className="bg-red-50 border border-red-200 rounded-[7px] px-4 py-3 text-[12.5px] text-red-700">
+            ⛔ Cannot delete — this LP has {txns.length} capital call{txns.length !== 1 ? 's' : ''} recorded.
+            Remove all capital calls first before deleting the LP.
+          </div>
+        ) : !showDelete ? (
+          <button onClick={() => setShowDelete(true)}
+            className="px-4 py-2 rounded-[7px] text-[12.5px] font-medium border border-red-300 text-red-600 bg-white hover:bg-red-50 transition-colors">
+            Delete This LP
+          </button>
+        ) : (
+          <div className="bg-red-50 border border-red-200 rounded-[7px] p-4">
+            <p className="text-[12.5px] text-red-700 font-medium mb-1">
+              Are you sure you want to delete <strong>{lp?.name}</strong>?
+            </p>
+            <p className="text-[12px] text-red-500 mb-3">This cannot be undone.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setShowDelete(false)}
+                className="px-3 py-1.5 rounded-[7px] text-[12px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleDelete} disabled={deleting}
+                className="px-3 py-1.5 rounded-[7px] text-[12px] font-medium bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-60 flex items-center gap-1.5">
+                {deleting ? (
+                  <><svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>Deleting...</>
+                ) : 'Yes, Delete LP'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

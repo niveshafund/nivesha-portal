@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import Link from 'next/link';
 import ImportModal from '@/components/ImportModal';
 import { getFundById, getCompaniesByFund, getLPsByFund, getTransactionsByFund, getExpensesByFund, DbFund, DbCompany, DbLP, DbTransaction, DbExpense } from '@/lib/db';
@@ -25,9 +27,175 @@ const coColor = (name: string): string => {
   return palette[Math.abs(hash) % palette.length];
 };
 
-export default function FundDetailPage({ params }: { params: Promise<{ id: string }> }) {
+// ── Grouped & expandable Invested Capital table ──────────────
+type GroupedTxnProps = {
+  txns: any[];
+  fundId: string;
+  onImport: () => void;
+};
+
+function InvestedCapitalGrouped({ txns, fundId, onImport }: GroupedTxnProps) {
+  const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+
+  const toggle = (name: string) =>
+    setExpanded(s => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n; });
+
+  const cleanDesc = (desc: string) =>
+    desc.replace(/^SAFE\s*(with\s*)?/i, '').replace(/SAFE/g, '')
+      .split(' · ').map(p => p.trim()).filter(Boolean).join(' · ');
+
+  // Group transactions by company
+  const groups = React.useMemo(() => {
+    const map = new Map<string, { company_name: string; company_id: string | null; txns: any[] }>();
+    txns.forEach(t => {
+      const key = t.company_name;
+      if (!map.has(key)) map.set(key, { company_name: t.company_name, company_id: t.company_id, txns: [] });
+      map.get(key)!.txns.push(t);
+    });
+    // Sort by most recent transaction date
+    return Array.from(map.values()).sort((a, b) => {
+      const aDate = a.txns[0]?.date ?? '';
+      const bDate = b.txns[0]?.date ?? '';
+      return bDate.localeCompare(aDate);
+    });
+  }, [txns]);
+
+  const totalInvested = txns.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
+  const totalDistrib  = txns.filter(t => t.type === 'Distribution').reduce((s, t) => s + t.amount, 0);
+
+  const fmtFull = (n: number) => `$${n.toLocaleString()}`;
+  const fmt     = (n: number) => n >= 1_000_000 ? `$${(n/1_000_000).toFixed(1)}m` : n >= 1_000 ? `$${(n/1_000).toFixed(0)}k` : `$${n.toLocaleString()}`;
+
+  return (
+    <div>
+      <div className="mb-4">
+        <p className="text-[12.5px] text-[#6b6860]">Investments grouped by company — click the arrow to expand transactions.</p>
+        <p className="text-[12px] text-[#9b9890] mt-1">
+          💡 <strong>New company?</strong> Use "+ New Company Investment" &nbsp;·&nbsp;
+          <strong>Follow-on?</strong> Click company name → Transactions → + Add Transaction
+        </p>
+      </div>
+      <div className="bg-white border border-[#e8e6df] rounded-xl">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
+          <div className="text-[13.5px] font-semibold">
+            Invested Capital
+            <span className="text-[#9b9890] font-normal text-[12px] ml-2">
+              {groups.length} compan{groups.length !== 1 ? 'ies' : 'y'} · {txns.length} transaction{txns.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onImport} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↑ Import</button>
+            <a href={`/funds/${fundId}/investments/new`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">+ New Company Investment</a>
+          </div>
+        </div>
+
+        {groups.length === 0 ? (
+          <div className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">
+            No transactions yet. Click "+ New Company Investment" to record your first investment.
+          </div>
+        ) : (
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                {['','Company','Rounds','Total Invested','Latest Round','Last Date',''].map((h, i) => (
+                  <th key={i} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map(g => {
+                const isOpen       = expanded.has(g.company_name);
+                const investments  = g.txns.filter(t => t.type === 'Investment');
+                const totalInv     = investments.reduce((s, t) => s + t.amount, 0);
+                const latestTxn    = [...g.txns].sort((a, b) => b.date.localeCompare(a.date))[0];
+                const latestRound  = latestTxn?.instrument || '—';
+                const latestDate   = latestTxn?.date || '—';
+
+                return (
+                  <React.Fragment key={g.company_name}>
+                    {/* ── Company summary row ── */}
+                    <tr
+                      className={`transition-colors ${g.txns.length > 1 ? 'hover:bg-[#f0f4ff] cursor-pointer' : 'hover:bg-[#f9f8f5]'}`}
+                      onClick={() => g.txns.length > 1 && toggle(g.company_name)}
+                    >
+                      <td className="px-3 py-3 border-b border-[#e8e6df] w-8">
+                        {g.txns.length > 1 ? (
+                          <span className={`inline-block transition-transform duration-200 text-[#6b6860] text-[12px] ${isOpen ? 'rotate-90' : ''}`}>▶</span>
+                        ) : (
+                          <span className="text-[#e8e6df] text-[12px]">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 border-b border-[#e8e6df]">
+                        {g.company_id ? (
+                          <a href={`/funds/${fundId}/companies/${g.company_id}?from=invested`}
+                            onClick={e => e.stopPropagation()}
+                            className="font-semibold text-[13px] text-[#2d5be3] hover:underline">
+                            {g.company_name}
+                          </a>
+                        ) : (
+                          <span className="font-semibold text-[13px]">{g.company_name}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">
+                        <span className="px-2 py-0.5 rounded-full bg-[#eef2fd] text-[#2d5be3] text-[11px] font-medium">
+                          {g.txns.length} transaction{g.txns.length !== 1 ? 's' : ''}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 border-b border-[#e8e6df] font-mono text-[13px] font-semibold text-red-600">
+                        -{fmt(totalInv)}
+                      </td>
+                      <td className="px-4 py-3 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{latestRound}</td>
+                      <td className="px-4 py-3 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{latestDate}</td>
+                      <td className="px-4 py-3 border-b border-[#e8e6df] text-[11.5px] text-[#9b9890]">
+                        {g.txns.length > 1 ? (isOpen ? 'collapse' : 'expand') : ''}
+                      </td>
+                    </tr>
+
+                    {/* ── Expanded transaction rows (or always shown if single) ── */}
+                    {(isOpen || g.txns.length === 1) && g.txns.map(t => (
+                      <tr key={t.id} className="bg-[#f9f8f5]">
+                        <td className="px-3 py-2 border-b border-[#e8e6df]" />
+                        <td className="px-4 py-2 border-b border-[#e8e6df] pl-8 text-[12px] text-[#6b6860]">
+                          <span className="text-[#9b9890]">↳</span> {t.date}
+                        </td>
+                        <td className="px-4 py-2 border-b border-[#e8e6df]">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${t.type === 'Investment' ? 'bg-red-50 text-red-600' : t.type === 'Distribution' ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'}`}>
+                            {t.type}
+                          </span>
+                        </td>
+                        <td className={`px-4 py-2 border-b border-[#e8e6df] font-mono text-[12px] font-medium ${t.type === 'Investment' ? 'text-red-600' : 'text-green-600'}`}>
+                          {t.type === 'Investment' ? '-' : '+'}{fmtFull(t.amount)}
+                        </td>
+                        <td className="px-4 py-2 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{t.instrument}</td>
+                        <td className="px-4 py-2 border-b border-[#e8e6df] text-[12px] text-[#9b9890] max-w-[260px] whitespace-normal" colSpan={2}>
+                          {t.description ? cleanDesc(t.description) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+
+        {txns.length > 0 && (
+          <div className="px-5 py-3 border-t border-[#e8e6df] bg-[#f9f8f5] flex gap-8 text-[12px]">
+            <div><span className="text-[#6b6860]">Total Invested: </span><span className="font-mono font-semibold text-red-600">-{fmtFull(totalInvested)}</span></div>
+            <div><span className="text-[#6b6860]">Total Distributions: </span><span className="font-mono font-semibold text-green-600">+{fmtFull(totalDistrib)}</span></div>
+            <div><span className="text-[#6b6860]">Companies: </span><span className="font-semibold">{groups.length}</span></div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const { id } = React.use(params);
-  const [tab, setTab] = useState<Tab>('overview');
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<Tab>((searchParams.get('tab') as Tab) || 'overview');
   const [importModal, setImportModal] = useState<'lps' | 'companies' | 'investments' | null>(null);
   const [fund, setFund] = useState<DbFund | null>(null);
   const [companies, setCompanies] = useState<DbCompany[]>([]);
@@ -54,6 +222,7 @@ export default function FundDetailPage({ params }: { params: Promise<{ id: strin
       } finally {
         setLoading(false);
       }
+
     }
     load();
   }, [id]);
@@ -248,7 +417,7 @@ export default function FundDetailPage({ params }: { params: Promise<{ id: strin
                             style={{ background: coColor(co.name) }}>
                             {co.name.slice(0,2).toUpperCase()}
                           </div>
-                          <a href={`/funds/${id}/companies/${co.id}`} className="font-medium text-[12.5px] text-[#2d5be3] hover:underline">{co.name}</a>
+                          <a href={`/funds/${id}/companies/${co.id}?from=portfolio`} className="font-medium text-[12.5px] text-[#2d5be3] hover:underline">{co.name}</a>
                         </div>
                       </td>
                       <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{co.sector || '—'}</td>
@@ -287,7 +456,12 @@ export default function FundDetailPage({ params }: { params: Promise<{ id: strin
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
               <div className="text-[13.5px] font-semibold">Limited Partners <span className="text-[#9b9890] font-normal text-[12px]">({lps.length})</span></div>
               <div className="flex gap-2">
-                <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↓ Export</button>
+                <button onClick={() => {
+                  const headers = ['Investor Name*','Investing As','Commitment Amount*','Currency*','Called Capital','Distributions','Commitment Date','Email','Phone','Address Line 1','Address Line 2','City','State','ZIP Code','Country','Contact Name','Notes'];
+                  const rows = lps.map(lp => [lp.name,'',lp.commitment,'USD',lp.called,lp.distributions,lp.join_date||'',lp.email||'',lp.phone||'',lp.address_line1||'',lp.address_line2||'',lp.city||'',lp.state||'',lp.zip||'',lp.country||'','',lp.notes||'']);
+                  const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(','))].join('\n');
+                  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = 'limited_partners.csv'; a.click();
+                }} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↓ Export</button>
                 <button onClick={() => setImportModal('lps')} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↑ Import</button>
                 <Link href={`/funds/${id}/lps/new`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">+ Add Limited Partner</Link>
               </div>
@@ -338,60 +512,13 @@ export default function FundDetailPage({ params }: { params: Promise<{ id: strin
 
       {/* ══ INVESTED CAPITAL ══ */}
       {tab === 'invested' && (
-        <div>
-          <p className="text-[12.5px] text-[#6b6860] mb-4">All investment transactions for this fund.</p>
-          <div className="bg-white border border-[#e8e6df] rounded-xl">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
-              <div className="text-[13.5px] font-semibold">Invested Capital <span className="text-[#9b9890] font-normal text-[12px]">({txns.filter(t=>t.type==='Investment').length} investments)</span></div>
-              <div className="flex gap-2">
-                <button onClick={() => setImportModal('investments')} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↑ Import</button>
-                <Link href={`/funds/${id}/investments/new`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">+ Create Investment</Link>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead><tr>
-                  {['Date','Company','Type','Instrument','Amount','Description'].map(h => (
-                    <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {txns.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">
-                      No transactions yet. Click "Create Investment" to record your first investment.
-                    </td></tr>
-                  ) : txns.map(t => (
-                    <tr key={t.id} className="hover:bg-[#f9f8f5] transition-colors">
-                      <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860] whitespace-nowrap">{t.date}</td>
-                      <td className="px-4 py-2.5 border-b border-[#e8e6df]">
-                        {t.company_id ? (
-                          <a href={`/funds/${id}/companies/${t.company_id}`} className="font-medium text-[12.5px] text-[#2d5be3] hover:underline">{t.company_name}</a>
-                        ) : (
-                          <span className="font-medium text-[12.5px]">{t.company_name}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 border-b border-[#e8e6df]">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${t.type === 'Investment' ? 'bg-red-50 text-red-600' : t.type === 'Distribution' ? 'bg-green-50 text-green-700' : t.type === 'Exit' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>{t.type}</span>
-                      </td>
-                      <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{t.instrument}</td>
-                      <td className={`px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] font-medium ${t.type === 'Investment' ? 'text-red-600' : 'text-green-600'}`}>
-                        {t.type === 'Investment' ? '-' : '+'}{fmtFull(t.amount)}
-                      </td>
-                      <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860] max-w-[240px] truncate">{t.description || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {txns.length > 0 && (
-              <div className="px-5 py-3 border-t border-[#e8e6df] bg-[#f9f8f5] flex gap-8 text-[12px]">
-                <div><span className="text-[#6b6860]">Total Invested: </span><span className="font-mono font-semibold text-red-600">-{fmtFull(txns.filter(t=>t.type==='Investment').reduce((s,t)=>s+t.amount,0))}</span></div>
-                <div><span className="text-[#6b6860]">Total Distributions: </span><span className="font-mono font-semibold text-green-600">+{fmtFull(txns.filter(t=>t.type==='Distribution').reduce((s,t)=>s+t.amount,0))}</span></div>
-              </div>
-            )}
-          </div>
-        </div>
+        <InvestedCapitalGrouped
+          txns={txns}
+          fundId={id}
+          onImport={() => setImportModal('investments')}
+        />
       )}
+
 
       {/* ══ EXPENSES ══ */}
       {tab === 'expenses' && (
@@ -456,5 +583,13 @@ export default function FundDetailPage({ params }: { params: Promise<{ id: strin
         />
       )}
     </div>
+  );
+}
+
+export default function FundDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-64 text-[#6b6860]">Loading...</div>}>
+      <FundDetailInner params={params} />
+    </Suspense>
   );
 }

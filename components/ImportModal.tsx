@@ -26,8 +26,9 @@ type Props = {
 // ─── COLUMN MAPS ─────────────────────────────────────────────
 
 const LP_COLS = [
-  'Investor Name*', 'Investing As', 'Commitment Amount*',
-  'Currency*', 'Commitment Date', 'Email', 'Phone',
+  'Investor Name*', 'Investing As', 'Commitment Amount*', 'Currency*',
+  'Called Capital', 'Distributions',
+  'Commitment Date', 'Email', 'Phone',
   'Address Line 1', 'Address Line 2', 'City', 'State', 'ZIP Code', 'Country',
   'Contact Name', 'Notes',
 ];
@@ -190,20 +191,27 @@ export default function ImportModal({ type, fundId, onClose, onDone }: Props) {
 
       try {
         if (type === 'lps') {
-          const name = String(row['Investor Name*'] || row['Investor Name'] || '').trim();
+          const name       = String(row['Investor Name*'] || row['Investor Name'] || '').trim();
           const commitment = Number(row['Commitment Amount*'] || row['Commitment Amount'] || 0);
-          if (!name) throw new Error('Investor Name is required');
+          const called     = row['Called Capital']  ? Number(row['Called Capital'])  : 0;
+          const distrib    = row['Distributions']   ? Number(row['Distributions'])   : 0;
+          if (!name)       throw new Error('Investor Name is required');
           if (!commitment) throw new Error('Commitment Amount is required');
 
-          const { error } = await supabase.from('lps').insert({
+          const notesVal = [
+            row['Contact Name'] ? `Contact: ${row['Contact Name']}` : '',
+            row['Notes'] || '',
+          ].filter(Boolean).join(' | ') || null;
+
+          const { data: newLP, error } = await supabase.from('lps').insert({
             fund_id:       fundId,
             name,
             email:         row['Email'] || null,
             phone:         row['Phone'] || null,
             type:          'Individual',
             commitment,
-            called:        0,
-            distributions: 0,
+            called,
+            distributions: distrib,
             ownership_pct: 0,
             status:        'Active',
             join_date:     parseDate(row['Commitment Date']) || null,
@@ -213,9 +221,21 @@ export default function ImportModal({ type, fundId, onClose, onDone }: Props) {
             state:         row['State'] || null,
             zip:           row['ZIP Code'] || null,
             country:       row['Country'] || 'USA',
-            notes:         row['Notes'] || row['Contact Name'] ? `Contact: ${row['Contact Name'] || ''}${row['Notes'] ? ' | ' + row['Notes'] : ''}` : null,
-          });
+            notes:         notesVal,
+          }).select().single();
           if (error) throw new Error(error.message);
+
+          // If called capital exists, create an opening balance transaction
+          if (called > 0 && newLP) {
+            await supabase.from('lp_transactions').insert({
+              lp_id:   newLP.id,
+              fund_id: fundId,
+              date:    parseDate(row['Commitment Date']) || new Date().toISOString().split('T')[0],
+              amount:  called,
+              type:    'Capital Call',
+              notes:   'Opening balance — imported from previous system',
+            });
+          }
 
         } else if (type === 'companies') {
           const name = String(row['Entity Name*'] || row['Entity Name'] || '').trim();

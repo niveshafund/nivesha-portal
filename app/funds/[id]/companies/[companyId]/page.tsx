@@ -1,10 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import Link from 'next/link';
 import {
   getCompanyById, updateCompany, getTransactionsByCompany,
-  getValuationsByCompany, upsertValuation, getCompanyUpdates,
+  getValuationsByCompany, upsertValuation, updateTransaction, deleteTransaction, createTransaction, getCompanyUpdates,
   createCompanyUpdate, deleteCompanyUpdate,
   DbCompany, DbTransaction, DbValuation, DbCompanyUpdate,
 } from '@/lib/db';
@@ -25,8 +27,10 @@ const QUARTER_END: Record<string,string> = {
 
 type Tab = 'overview' | 'transactions' | 'valuations' | 'updates';
 
-export default function CompanyDetailPage({ params }: { params: Promise<{ id: string; companyId: string }> }) {
+function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyId: string }> }) {
   const { id: fundId, companyId } = React.use(params);
+  const searchParams = useSearchParams();
+  const fromTab = searchParams.get('from') || 'portfolio'; // 'portfolio' or 'invested'
 
   const [tab, setTab]           = useState<Tab>('overview');
   const [company, setCompany]   = useState<DbCompany | null>(null);
@@ -46,12 +50,21 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   });
 
   // New valuation form
+  const [showAddTxnForm, setShowAddTxnForm] = useState(false);
+  const [newTxnForm, setNewTxnForm] = useState({ date: new Date().toISOString().split('T')[0], type: 'Investment', amount: '', instrument: 'SAFE', description: '', round: '' });
+  const [savingNewTxn, setSavingNewTxn] = useState(false);
+  const [editingTxn, setEditingTxn] = useState<DbTransaction | null>(null);
+  const [savingTxnEdit, setSavingTxnEdit] = useState(false);
+  const [editingVal, setEditingVal] = useState<DbValuation | null>(null);
+  const [savingValEdit, setSavingValEdit] = useState(false);
   const [showValForm, setShowValForm] = useState(false);
   const [valForm, setValForm] = useState({ quarter: 'Q1 2026', value: '', moic: '', irr: '', round: '', notes: '' });
   const [savingVal, setSavingVal] = useState(false);
 
   // New update form
   const [showUpdateForm, setShowUpdateForm] = useState(false);
+  const [editingUpdate, setEditingUpdate] = useState<DbCompanyUpdate | null>(null);
+  const [savingUpdateEdit, setSavingUpdateEdit] = useState(false);
   const [updateForm, setUpdateForm] = useState({ title: '', body: '', date: new Date().toISOString().split('T')[0] });
   const [savingUpdate, setSavingUpdate] = useState(false);
 
@@ -80,6 +93,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           about:    co.about     ?? '',
         });
       }
+
       setTxns(t);
       setVals(v);
       setUpdates(u);
@@ -114,6 +128,101 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       setSaveError(err.message ?? 'Failed to save');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAddNewTxn = async () => {
+    if (!newTxnForm.amount || !newTxnForm.date) return;
+    setSavingNewTxn(true);
+    try {
+      const parts: string[] = [];
+      if (newTxnForm.description) parts.push(newTxnForm.description);
+      if (newTxnForm.round) parts.push(newTxnForm.round);
+
+      await createTransaction({
+        fund_id:      fundId,
+        company_id:   companyId,
+        company_name: company!.name,
+        date:         newTxnForm.date,
+        type:         newTxnForm.type as any,
+        amount:       Number(newTxnForm.amount),
+        instrument:   newTxnForm.instrument as any,
+        description:  parts.join(' · ') || undefined,
+      });
+      const t = await getTransactionsByCompany(companyId);
+      setTxns(t);
+      setNewTxnForm({ date: new Date().toISOString().split('T')[0], type: 'Investment', amount: '', instrument: 'SAFE', description: '', round: '' });
+      setShowAddTxnForm(false);
+    } catch (err: any) {
+      alert('Failed to add transaction: ' + err.message);
+    } finally {
+      setSavingNewTxn(false);
+    }
+  };
+
+  const handleDeleteTxn = async (txnId: string) => {
+    if (!confirm('Delete this transaction? This cannot be undone.')) return;
+    try {
+      await deleteTransaction(txnId);
+      setTxns(t => t.filter(x => x.id !== txnId));
+    } catch (err: any) {
+      alert('Failed to delete transaction: ' + err.message);
+    }
+  };
+
+  const handleSaveTxnEdit = async () => {
+    if (!editingTxn) return;
+    setSavingTxnEdit(true);
+    try {
+      const updated = await updateTransaction(editingTxn.id, {
+        date:        editingTxn.date,
+        type:        editingTxn.type,
+        amount:      editingTxn.amount,
+        instrument:  editingTxn.instrument,
+        description: editingTxn.description || undefined,
+      });
+      setTxns(t => t.map(x => x.id === updated.id ? updated : x));
+      setEditingTxn(null);
+    } catch (err: any) {
+      alert('Failed to update transaction: ' + err.message);
+    } finally {
+      setSavingTxnEdit(false);
+    }
+  };
+
+  const handleDeleteVal = async (valId: string) => {
+    if (!confirm('Delete this valuation entry?')) return;
+    try {
+      const { supabase } = await import('@/lib/supabase');
+      await supabase.from('valuations').delete().eq('id', valId);
+      setVals(v => v.filter(x => x.id !== valId));
+    } catch (err: any) {
+      alert('Failed to delete valuation: ' + err.message);
+    }
+  };
+
+  const handleSaveValEdit = async () => {
+    if (!editingVal) return;
+    setSavingValEdit(true);
+    try {
+      await upsertValuation({
+        company_id:  companyId,
+        fund_id:     fundId,
+        quarter:     editingVal.quarter,
+        quarter_end: QUARTER_END[editingVal.quarter] ?? editingVal.quarter_end,
+        value:       editingVal.value,
+        moic:        editingVal.moic,
+        irr:         editingVal.irr,
+        round:       editingVal.round || undefined,
+        notes:       editingVal.notes || undefined,
+      });
+      const v = await getValuationsByCompany(companyId);
+      setVals(v);
+      setEditingVal(null);
+    } catch (err: any) {
+      alert('Failed to update valuation: ' + err.message);
+    } finally {
+      setSavingValEdit(false);
     }
   };
 
@@ -166,6 +275,26 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
     }
   };
 
+  const handleSaveUpdateEdit = async () => {
+    if (!editingUpdate) return;
+    setSavingUpdateEdit(true);
+    try {
+      const { supabase } = await import('@/lib/supabase');
+      await supabase.from('company_updates').update({
+        title: editingUpdate.title,
+        body:  editingUpdate.body,
+        date:  editingUpdate.date,
+      }).eq('id', editingUpdate.id);
+      const u = await getCompanyUpdates(companyId);
+      setUpdates(u);
+      setEditingUpdate(null);
+    } catch (err: any) {
+      alert('Failed to update: ' + err.message);
+    } finally {
+      setSavingUpdateEdit(false);
+    }
+  };
+
   const handleDeleteUpdate = async (updateId: string) => {
     if (!confirm('Delete this update?')) return;
     try {
@@ -197,12 +326,17 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   const totalInvested = txns.filter(t => t.type === 'Investment').reduce((s,t) => s + t.amount, 0);
   const latestVal     = valuations[0];
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'overview',     label: 'Overview' },
-    { key: 'transactions', label: 'Transactions' },
-    { key: 'valuations',   label: 'Valuations' },
-    { key: 'updates',      label: 'Updates' },
-  ];
+  const tabs: { key: Tab; label: string }[] = fromTab === 'invested'
+    ? [
+        { key: 'overview',     label: 'Overview' },
+        { key: 'transactions', label: 'Transactions' },
+      ]
+    : [
+        { key: 'overview',     label: 'Overview' },
+        { key: 'transactions', label: 'Transactions' },
+        { key: 'valuations',   label: 'Valuations' },
+        { key: 'updates',      label: 'Updates' },
+      ];
 
   return (
     <div className="max-w-5xl">
@@ -210,9 +344,9 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       <div className="flex items-start justify-between mb-4">
         <div>
           <div className="flex items-center gap-2 text-[12.5px] text-[#6b6860] mb-2">
-            <Link href={`/funds/${fundId}`} className="hover:text-[#2d5be3]">← Fund</Link>
-            <span>/</span>
-            <span>Portfolio</span>
+            <Link href={`/funds/${fundId}?tab=${fromTab}`} className="hover:text-[#2d5be3]">
+              ← {fromTab === 'invested' ? 'Invested Capital' : 'Portfolio'}
+            </Link>
             <span>/</span>
             <span className="text-[#1a1917] font-medium">{company.name}</span>
           </div>
@@ -233,10 +367,12 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
         </div>
-        <button onClick={() => setEditing(!editing)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
-          {editing ? '✕ Cancel' : '✏️ Edit Company'}
-        </button>
+        {fromTab === 'invested' && (
+          <button onClick={() => setEditing(!editing)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+            {editing ? '✕ Cancel' : '✏️ Edit Company'}
+          </button>
+        )}
       </div>
 
       {/* KPI tiles */}
@@ -266,6 +402,60 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
       {saveError && (
         <div className="bg-red-50 border border-red-200 rounded-[7px] px-4 py-3 text-[12.5px] text-red-700 mb-4">⚠️ {saveError}</div>
+      )}
+
+      {/* ── Edit Transaction Modal ── */}
+      {editingTxn && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditingTxn(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6">
+            <h3 className="text-[16px] font-semibold mb-4">Edit Transaction</h3>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-[12px] font-medium mb-1">Date</label>
+                <input type="date" value={editingTxn.date}
+                  onChange={e => setEditingTxn(t => t ? {...t, date: e.target.value} : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium mb-1">Type</label>
+                <select value={editingTxn.type}
+                  onChange={e => setEditingTxn(t => t ? {...t, type: e.target.value as any} : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
+                  <option>Investment</option><option>Distribution</option><option>Exit</option><option>Fee</option><option>Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium mb-1">Amount (USD)</label>
+                <input type="number" value={editingTxn.amount}
+                  onChange={e => setEditingTxn(t => t ? {...t, amount: Number(e.target.value)} : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium mb-1">Instrument</label>
+                <select value={editingTxn.instrument}
+                  onChange={e => setEditingTxn(t => t ? {...t, instrument: e.target.value as any} : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
+                  <option>SAFE</option><option>Convertible Note</option><option>Preferred Stock</option><option>Common Stock</option><option>Equity</option><option>Other</option>
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-[12px] font-medium mb-1">Description</label>
+                <input value={editingTxn.description || ''}
+                  onChange={e => setEditingTxn(t => t ? {...t, description: e.target.value} : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setEditingTxn(null)}
+                className="px-4 py-2 rounded-[7px] text-[13px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">Cancel</button>
+              <button onClick={handleSaveTxnEdit} disabled={savingTxnEdit}
+                className="px-4 py-2 rounded-[7px] text-[13px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
+                {savingTxnEdit ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ══ OVERVIEW ══ */}
@@ -346,6 +536,19 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                 { label: 'Security Type',   value: company.security_type || '—' },
                 { label: 'Round',           value: company.round || '—' },
                 { label: 'Valuation',       value: company.valuation ? `${fmtFull(company.valuation)} (${company.valuation_type || 'Post-money'})` : '—' },
+                { label: 'Investment Terms', value: (() => {
+                  const desc = txns.find(t => t.type === 'Investment')?.description || '';
+                  if (!desc) return '—';
+                  // Strip headline (anything before ' | SAFE' or ' | Post-money' or ' | Pre-money')
+                  const termsPart = desc.split(' | ').filter(p =>
+                    p.startsWith('SAFE') ||
+                    p.includes('valuation') ||
+                    p.includes('discount') ||
+                    p.includes('Series') ||
+                    p.includes('Growth Stage')
+                  ).join(' · ');
+                  return termsPart || desc;
+                })() },
                 { label: 'CEO Name',        value: company.contact_name  || '—' },
                 { label: 'CEO Email',       value: company.contact_email || '—' },
                 { label: 'CEO Phone',       value: (company as any).contact_phone || '—' },
@@ -371,21 +574,106 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       {tab === 'transactions' && (
         <div className="bg-white border border-[#e8e6df] rounded-xl">
           <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
-            <div className="text-[13.5px] font-semibold">Transactions <span className="text-[#9b9890] font-normal text-[12px]">({txns.length})</span></div>
-            <Link href={`/funds/${fundId}/investments/new`}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">
-              + Add Transaction
-            </Link>
+            <div>
+              <div className="text-[13.5px] font-semibold">Transactions <span className="text-[#9b9890] font-normal text-[12px]">({txns.length})</span></div>
+              {fromTab === 'portfolio' && (
+                <div className="text-[11.5px] text-[#9b9890] mt-0.5">Read-only — add new transactions from the Invested Capital tab</div>
+              )}
+            </div>
+            {fromTab === 'invested' && (
+              <button onClick={() => setShowAddTxnForm(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">
+                + Add Transaction
+              </button>
+            )}
           </div>
+
+          {/* Inline Add Transaction form — only in invested mode */}
+          {fromTab === 'invested' && showAddTxnForm && (
+            <div className="px-5 py-4 border-b border-[#e8e6df] bg-[#f9f8f5]">
+              <div className="text-[13px] font-semibold mb-1">New Transaction for {company?.name}</div>
+              <p className="text-[11.5px] text-[#9b9890] mb-3">Company is pre-selected. Fill in the transaction details below.</p>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div>
+                  <label className="block text-[11.5px] font-medium mb-1">Date *</label>
+                  <input type="date" value={newTxnForm.date}
+                    onChange={e => setNewTxnForm(f => ({...f, date: e.target.value}))}
+                    className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+                </div>
+                <div>
+                  <label className="block text-[11.5px] font-medium mb-1">Type *</label>
+                  <select value={newTxnForm.type}
+                    onChange={e => setNewTxnForm(f => ({...f, type: e.target.value}))}
+                    className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
+                    <option>Investment</option>
+                    <option>Distribution</option>
+                    <option>Exit</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11.5px] font-medium mb-1">Amount (USD) *</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
+                    <input type="number" value={newTxnForm.amount}
+                      onChange={e => setNewTxnForm(f => ({...f, amount: e.target.value}))}
+                      placeholder="0"
+                      className="w-full pl-6 pr-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[11.5px] font-medium mb-1">Instrument</label>
+                  <select value={newTxnForm.instrument}
+                    onChange={e => setNewTxnForm(f => ({...f, instrument: e.target.value}))}
+                    className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
+                    <option>SAFE</option>
+                    <option>Convertible Note</option>
+                    <option>Preferred Stock</option>
+                    <option>Common Stock</option>
+                    <option>Equity</option>
+                    <option>Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11.5px] font-medium mb-1">Round</label>
+                  <select value={newTxnForm.round}
+                    onChange={e => setNewTxnForm(f => ({...f, round: e.target.value}))}
+                    className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
+                    <option value="">Select…</option>
+                    {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11.5px] font-medium mb-1">Terms / Notes</label>
+                  <input value={newTxnForm.description}
+                    onChange={e => setNewTxnForm(f => ({...f, description: e.target.value}))}
+                    placeholder="e.g., with valuation cap, 20% discount"
+                    className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={handleAddNewTxn} disabled={savingNewTxn || !newTxnForm.amount || !newTxnForm.date}
+                  className="px-3 py-1.5 rounded-[7px] text-[12px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
+                  {savingNewTxn ? 'Saving...' : 'Save Transaction'}
+                </button>
+                <button onClick={() => setShowAddTxnForm(false)}
+                  className="px-3 py-1.5 rounded-[7px] text-[12px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           <table className="w-full border-collapse">
             <thead><tr>
-              {['Date','Type','Instrument','Amount','Description'].map(h => (
+              {['Date','Type','Instrument','Amount','Description', ...(fromTab === 'invested' ? ['Actions'] : [])].map(h => (
                 <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5]">{h}</th>
               ))}
             </tr></thead>
             <tbody>
               {txns.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-[12.5px] text-[#9b9890]">No transactions yet.</td></tr>
+                <tr><td colSpan={fromTab === 'invested' ? 6 : 5} className="px-4 py-8 text-center text-[12.5px] text-[#9b9890]">
+                  {fromTab === 'invested' ? 'No transactions yet. Click "+ Add Transaction" to record one.' : 'No transactions recorded.'}
+                </td></tr>
               ) : txns.map(t => (
                 <tr key={t.id} className="hover:bg-[#f9f8f5] transition-colors">
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{t.date}</td>
@@ -396,11 +684,25 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   <td className={`px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] font-medium ${t.type === 'Investment' ? 'text-red-600' : 'text-green-600'}`}>
                     {t.type === 'Investment' ? '-' : '+'}{fmtFull(t.amount)}
                   </td>
-                  <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860] max-w-[300px] truncate">{t.description || '—'}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860] max-w-[240px] whitespace-normal leading-relaxed">{t.description || '—'}</td>
+                  {fromTab === 'invested' && (
+                    <td className="px-4 py-2.5 border-b border-[#e8e6df] whitespace-nowrap">
+                      <div className="flex gap-2">
+                        <button onClick={() => setEditingTxn({...t})} className="text-[11.5px] text-[#2d5be3] hover:underline">Edit</button>
+                        <button onClick={() => handleDeleteTxn(t.id)} className="text-[11.5px] text-red-500 hover:text-red-700">Delete</button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
+          {txns.length > 0 && (
+            <div className="px-5 py-3 border-t border-[#e8e6df] bg-[#f9f8f5] flex gap-8 text-[12px]">
+              <div><span className="text-[#6b6860]">Total Invested: </span><span className="font-mono font-semibold text-red-600">-{fmtFull(txns.filter(t=>t.type==='Investment').reduce((s,t)=>s+t.amount,0))}</span></div>
+              <div><span className="text-[#6b6860]">Total Distributions: </span><span className="font-mono font-semibold text-green-600">+{fmtFull(txns.filter(t=>t.type==='Distribution').reduce((s,t)=>s+t.amount,0))}</span></div>
+            </div>
+          )}
         </div>
       )}
 
@@ -474,7 +776,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
           <table className="w-full border-collapse">
             <thead><tr>
-              {['Quarter','Company Value','MOIC','IRR','Round','Notes'].map(h => (
+              {['Quarter','Company Value','MOIC','IRR','Round','Notes','Actions'].map(h => (
                 <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5]">{h}</th>
               ))}
             </tr></thead>
@@ -493,10 +795,79 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${irrColor(v.irr)}`}>{v.irr !== 0 ? `${v.irr.toFixed(1)}%` : '—'}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{v.round || '—'}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{v.notes || '—'}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] whitespace-nowrap">
+                    <div className="flex gap-2">
+                      <button onClick={() => setEditingVal({...v})}
+                        className="text-[11.5px] text-[#2d5be3] hover:underline">Edit</button>
+                      <button onClick={() => handleDeleteVal(v.id)}
+                        className="text-[11.5px] text-red-500 hover:text-red-700">Delete</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* ── Edit Valuation Modal ── */}
+      {editingVal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditingVal(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6">
+            <h3 className="text-[16px] font-semibold mb-4">Edit Valuation — {editingVal.quarter}</h3>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-[12px] font-medium mb-1">Quarter</label>
+                <select value={editingVal.quarter}
+                  onChange={e => setEditingVal(v => v ? {...v, quarter: e.target.value} : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
+                  {QUARTERS.map(q => <option key={q} value={q}>{q}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium mb-1">Company Value (USD)</label>
+                <input type="number" value={editingVal.value}
+                  onChange={e => setEditingVal(v => v ? {...v, value: Number(e.target.value)} : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium mb-1">MOIC</label>
+                <input type="number" step="0.01" value={editingVal.moic}
+                  onChange={e => setEditingVal(v => v ? {...v, moic: Number(e.target.value)} : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium mb-1">IRR (%)</label>
+                <input type="number" step="0.1" value={editingVal.irr}
+                  onChange={e => setEditingVal(v => v ? {...v, irr: Number(e.target.value)} : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium mb-1">Round</label>
+                <select value={editingVal.round || ''}
+                  onChange={e => setEditingVal(v => v ? {...v, round: e.target.value} : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
+                  <option value="">Select…</option>
+                  {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium mb-1">Notes</label>
+                <input value={editingVal.notes || ''}
+                  onChange={e => setEditingVal(v => v ? {...v, notes: e.target.value} : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setEditingVal(null)}
+                className="px-4 py-2 rounded-[7px] text-[13px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">Cancel</button>
+              <button onClick={handleSaveValEdit} disabled={savingValEdit}
+                className="px-4 py-2 rounded-[7px] text-[13px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
+                {savingValEdit ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -556,18 +927,60 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
             <div className="space-y-3">
               {updates.map(u => (
                 <div key={u.id} className="bg-white border border-[#e8e6df] rounded-xl p-5">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-semibold text-[13.5px]">{u.title}</span>
-                        <span className="text-[11px] text-[#9b9890]">{u.date}</span>
-                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#f9f8f5] border border-[#e8e6df] text-[#6b6860]">GP Only</span>
+                  {editingUpdate?.id === u.id ? (
+                    // ── Inline edit form ──
+                    <div>
+                      <div className="grid grid-cols-4 gap-3 mb-3">
+                        <div className="col-span-3">
+                          <label className="block text-[11.5px] font-medium mb-1">Title</label>
+                          <input value={editingUpdate.title}
+                            onChange={e => setEditingUpdate(x => x ? {...x, title: e.target.value} : null)}
+                            className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+                        </div>
+                        <div>
+                          <label className="block text-[11.5px] font-medium mb-1">Date</label>
+                          <input type="date" value={editingUpdate.date}
+                            onChange={e => setEditingUpdate(x => x ? {...x, date: e.target.value} : null)}
+                            className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+                        </div>
                       </div>
-                      {u.body && <p className="text-[12.5px] text-[#6b6860] leading-relaxed">{u.body}</p>}
+                      <div className="mb-3">
+                        <label className="block text-[11.5px] font-medium mb-1">Notes</label>
+                        <textarea value={editingUpdate.body || ''}
+                          onChange={e => setEditingUpdate(x => x ? {...x, body: e.target.value} : null)}
+                          rows={3}
+                          className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3] resize-y" />
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={handleSaveUpdateEdit} disabled={savingUpdateEdit}
+                          className="px-3 py-1.5 rounded-[7px] text-[12px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
+                          {savingUpdateEdit ? 'Saving...' : 'Save'}
+                        </button>
+                        <button onClick={() => setEditingUpdate(null)}
+                          className="px-3 py-1.5 rounded-[7px] text-[12px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                          Cancel
+                        </button>
+                      </div>
                     </div>
-                    <button onClick={() => handleDeleteUpdate(u.id)}
-                      className="text-[11px] text-red-500 hover:text-red-700 ml-4 flex-shrink-0">Delete</button>
-                  </div>
+                  ) : (
+                    // ── Read view ──
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-semibold text-[13.5px]">{u.title}</span>
+                          <span className="text-[11px] text-[#9b9890]">{u.date}</span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#f9f8f5] border border-[#e8e6df] text-[#6b6860]">GP Only</span>
+                        </div>
+                        {u.body && <p className="text-[12.5px] text-[#6b6860] leading-relaxed">{u.body}</p>}
+                      </div>
+                      <div className="flex gap-2 ml-4 flex-shrink-0">
+                        <button onClick={() => setEditingUpdate({...u})}
+                          className="text-[11.5px] text-[#2d5be3] hover:underline">Edit</button>
+                        <button onClick={() => handleDeleteUpdate(u.id)}
+                          className="text-[11.5px] text-red-500 hover:text-red-700">Delete</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -575,5 +988,13 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         </div>
       )}
     </div>
+  );
+}
+
+export default function CompanyDetailPage({ params }: { params: Promise<{ id: string; companyId: string }> }) {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-64 text-[#6b6860]">Loading...</div>}>
+      <CompanyDetailInner params={params} />
+    </Suspense>
   );
 }

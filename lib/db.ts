@@ -235,6 +235,11 @@ export async function updateLP(id: string, updates: Partial<DbLP>): Promise<DbLP
   return data;
 }
 
+export async function deleteLP(id: string): Promise<void> {
+  const { error } = await supabase.from('lps').delete().eq('id', id);
+  if (error) throw error;
+}
+
 // ─── LP TRANSACTIONS ─────────────────────────────────────────
 
 export async function getLPTransactions(lpId: string): Promise<DbLPTransaction[]> {
