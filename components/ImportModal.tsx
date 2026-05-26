@@ -40,8 +40,9 @@ const COMPANY_COLS = [
 
 const INVESTMENT_COLS = [
   'Fund Name*', 'Company Name*', 'Transaction Type*',
-  'Instrument*', 'Amount*', 'Date* (dd/mm/yyyy)',
-  'Currency*', 'Post-Money Valuation', 'Pre-Money Valuation',
+  'Instrument*', 'Amount*', 'Date* (YYYY-MM-DD)',
+  'Currency*', 'Sector', 'Round', 'Security Type',
+  'Post-Money Valuation', 'Pre-Money Valuation',
   'SAFE Structure', 'Discount %',
   'CEO Full Name', 'CEO Email', 'CEO Phone',
 ];
@@ -261,11 +262,11 @@ export default function ImportModal({ type, fundId, onClose, onDone }: Props) {
         } else if (type === 'investments') {
           const companyName = String(row['Company Name*'] || row['Company Name'] || '').trim();
           const amount      = Number(row['Amount*'] || row['Amount'] || 0);
-          const date        = parseDate(row['Date* (dd/mm/yyyy)'] || row['Date'] || '');
+          const date        = parseDate(row['Date* (YYYY-MM-DD)'] || row['Date* (dd/mm/yyyy)'] || row['Date'] || '');
           const txnType     = String(row['Transaction Type*'] || row['Transaction Type'] || '').trim();
           if (!companyName) throw new Error('Company Name is required');
           if (!amount)      throw new Error('Amount is required');
-          if (!date)        throw new Error('Date is required or invalid format (use dd/mm/yyyy)');
+          if (!date)        throw new Error('Date is required or invalid format (use YYYY-MM-DD, e.g. 2024-07-15)');
 
           // Build investment terms description from SAFE/valuation fields
           const buildDesc = () => {
@@ -292,18 +293,39 @@ export default function ImportModal({ type, fundId, onClose, onDone }: Props) {
 
             if (existing) {
               companyId = existing.id;
+              // Update company totals to include this follow-on transaction
+              const { data: allCoTxns } = await supabase
+                .from('transactions')
+                .select('amount, type')
+                .eq('company_id', existing.id);
+              const prevInvested = (allCoTxns || [])
+                .filter((t: any) => t.type === 'Investment')
+                .reduce((s: number, t: any) => s + t.amount, 0);
+              const newInvested = prevInvested + amount;
+              const postMoney = row['Post-Money Valuation'] ? Number(row['Post-Money Valuation']) : null;
+              await supabase.from('companies').update({
+                invested:   newInvested,
+                unrealised: postMoney || newInvested,
+                moic:       postMoney ? postMoney / newInvested : 1,
+                // Update sector/round/security_type if provided and not already set
+                ...(row['Sector']        ? { sector:        row['Sector'] }                                              : {}),
+                ...(row['Round']         ? { round:         normalizeStage(row['Round']) }                               : {}),
+                ...(row['Security Type'] ? { security_type: row['Security Type'] }                                       : {}),
+              }).eq('id', existing.id);
             } else {
               const postMoney = row['Post-Money Valuation'] ? Number(row['Post-Money Valuation']) : null;
               const { data: newCo, error: coErr } = await supabase.from('companies').insert({
                 fund_id:       fundId,
                 name:          companyName,
                 status:        'Active',
+                sector:        row['Sector'] || null,
+                round:         normalizeStage(row['Round'] || ''),
+                security_type: row['Security Type'] || normalizeInstrument(row['Instrument*'] || row['Instrument'] || ''),
                 contact_name:  row['CEO Full Name']  || null,
                 contact_email: row['CEO Email']      || null,
                 contact_phone: row['CEO Phone']      || null,
                 valuation:     postMoney,
                 valuation_type: postMoney ? 'Post-money' : (row['Pre-Money Valuation'] ? 'Pre-money' : null),
-                security_type: normalizeInstrument(row['Instrument*'] || row['Instrument'] || ''),
                 invested:      amount,
                 unrealised:    postMoney || amount,
                 distributions: 0,
