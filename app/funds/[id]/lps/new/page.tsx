@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { createLP, getLPsByFund } from '@/lib/db';
+import { createLP, getLPsByFund, getFundMembersByRole, DbFundMember } from '@/lib/db';
 
 const US_STATES = [
   'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut',
@@ -31,7 +31,6 @@ type Form = {
   type: string;
   commitment: string;
   joinDate: string;
-  // Address
   addressLine1: string;
   addressLine2: string;
   city: string;
@@ -39,13 +38,14 @@ type Form = {
   zip: string;
   country: string;
   notes: string;
+  gp_contact: string;
 };
 
 const empty: Form = {
   name: '', email: '', phone: '', type: 'Individual',
   commitment: '', joinDate: '',
   addressLine1: '', addressLine2: '', city: '',
-  state: '', zip: '', country: 'USA', notes: '',
+  state: '', zip: '', country: 'USA', notes: '', gp_contact: '',
 };
 
 export default function AddLPPage({ params }: { params: Promise<{ id: string }> }) {
@@ -55,6 +55,14 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
   const [errors, setErrors] = useState<Partial<Record<keyof Form, string>>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [gps, setGPs] = useState<DbFundMember[]>([]);
+
+  // Load GPs for this fund dynamically from fund_members
+  useEffect(() => {
+    getFundMembersByRole(fundId, 'GP')
+      .then(setGPs)
+      .catch(() => setGPs([]));
+  }, [fundId]);
 
   const set = (k: keyof Form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -77,7 +85,6 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
     setSaving(true);
     setSaveError(null);
     try {
-      // Calculate ownership % based on total commitments
       const existingLPs = await getLPsByFund(fundId);
       const totalCommitted = existingLPs.reduce((s, lp) => s + lp.commitment, 0) + Number(form.commitment);
       const ownershipPct = totalCommitted > 0 ? (Number(form.commitment) / totalCommitted) * 100 : 0;
@@ -101,6 +108,7 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
         zip:           form.zip || undefined,
         country:       form.country || undefined,
         notes:         form.notes || undefined,
+        gp_contact:    form.gp_contact || undefined,
       });
       router.push(`/funds/${fundId}?tab=lps`);
     } catch (err: any) {
@@ -115,6 +123,8 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
     (errors[field]
       ? 'border-red-400 bg-red-50'
       : 'border-[#e8e6df] bg-white focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10');
+
+  const selectedGP = gps.find(g => g.name === form.gp_contact);
 
   return (
     <div className="max-w-3xl">
@@ -132,7 +142,7 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
         </div>
       )}
 
-      {/* Personal Information */}
+      {/* Investor Information */}
       <div className="bg-white border border-[#e8e6df] rounded-xl p-6 mb-4">
         <h2 className="text-[15px] font-semibold mb-5">Investor Information</h2>
 
@@ -155,6 +165,40 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
           </div>
         </div>
 
+        {/* GP Contact — dynamic from fund_members */}
+        <div className="mb-5">
+          <label className="block text-[13px] font-medium mb-1">
+            GP Contact <span className="text-[#9b9890] font-normal">(optional)</span>
+          </label>
+          <p className="text-[12px] text-[#9b9890] mb-2">The partner who brought this LP into the fund</p>
+          {gps.length === 0 ? (
+            <p className="text-[12px] text-[#9b9890] italic">
+              No GPs added to this fund yet.{' '}
+              <Link href={`/funds/${fundId}?tab=members`} className="text-[#2d5be3] hover:underline">Add GPs in the Members tab →</Link>
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {gps.map(gp => (
+                <button
+                  key={gp.id}
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, gp_contact: f.gp_contact === gp.name ? '' : gp.name }))}
+                  className={'px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border transition-all ' +
+                    (form.gp_contact === gp.name
+                      ? 'bg-[#2d5be3] text-white border-[#2d5be3]'
+                      : 'bg-white text-[#6b6860] border-[#e8e6df] hover:border-[#2d5be3]')}
+                >
+                  {gp.name}
+                  {gp.title && <span className="ml-1 opacity-70 text-[10.5px]">· {gp.title}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+          {selectedGP?.email && (
+            <p className="text-[11px] text-[#6b6860] mt-1.5">{selectedGP.email}</p>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 gap-4 mb-5">
           <div>
             <label className="block text-[13px] font-medium mb-1">Email <span className="text-[#9b9890] font-normal">(optional)</span></label>
@@ -171,7 +215,6 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
       {/* Fund Economics */}
       <div className="bg-white border border-[#e8e6df] rounded-xl p-6 mb-4">
         <h2 className="text-[15px] font-semibold mb-5">Fund Economics</h2>
-
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-[13px] font-medium mb-1">Commitment Amount (USD) <span className="text-red-500">*</span></label>
@@ -196,7 +239,6 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
       <div className="bg-white border border-[#e8e6df] rounded-xl p-6 mb-4">
         <h2 className="text-[15px] font-semibold mb-1">Mailing Address <span className="text-[#9b9890] font-normal text-[13px]">(optional)</span></h2>
         <p className="text-[12px] text-[#9b9890] mb-5">Used for quarterly reports and K-1 tax documents</p>
-
         <div className="mb-4">
           <label className="block text-[13px] font-medium mb-1">Address Line 1</label>
           <input type="text" value={form.addressLine1} onChange={set('addressLine1')} placeholder="123 Main Street" className={inputCls('addressLine1')} />

@@ -5,9 +5,9 @@ import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import Link from 'next/link';
 import ImportModal from '@/components/ImportModal';
-import { getFundById, getCompaniesByFund, getLPsByFund, getTransactionsByFund, getExpensesByFund, DbFund, DbCompany, DbLP, DbTransaction, DbExpense } from '@/lib/db';
+import { getFundById, getCompaniesByFund, getLPsByFund, getTransactionsByFund, getExpensesByFund, getFundMembers, createFundMember, updateFundMember, deleteFundMember, DbFund, DbCompany, DbLP, DbTransaction, DbExpense, DbFundMember, FundMemberRole } from '@/lib/db';
 
-type Tab = 'overview' | 'portfolio' | 'lps' | 'invested' | 'expenses';
+type Tab = 'overview' | 'portfolio' | 'lps' | 'invested' | 'expenses' | 'members';
 
 const fmt = (n: number): string => {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}m`;
@@ -190,6 +190,99 @@ function InvestedCapitalGrouped({ txns, fundId, onImport }: GroupedTxnProps) {
 }
 
 
+
+// ── Role badge colors ─────────────────────────────────────────
+const ROLE_COLORS: Record<FundMemberRole, string> = {
+  'GP':         'bg-purple-100 text-purple-700',
+  'Associate':  'bg-blue-100 text-blue-700',
+  'Analyst':    'bg-cyan-100 text-cyan-700',
+  'Finance':    'bg-amber-100 text-amber-700',
+  'LP Manager': 'bg-green-100 text-green-700',
+  'Viewer':     'bg-gray-100 text-gray-600',
+};
+
+const ROLES: FundMemberRole[] = ['GP','Associate','Analyst','Finance','LP Manager','Viewer'];
+
+function MemberRow({
+  member, onUpdate, onDelete,
+}: {
+  member: DbFundMember;
+  onUpdate: (u: Partial<Pick<DbFundMember, 'name'|'email'|'role'|'title'|'is_active'>>) => Promise<void>;
+  onDelete: () => Promise<void>;
+}) {
+  const [editing, setEditing] = React.useState(false);
+  const [form, setForm]       = React.useState({ name: member.name, email: member.email ?? '', role: member.role, title: member.title ?? '' });
+  const [saving, setSaving]   = React.useState(false);
+
+  if (editing) {
+    return (
+      <tr className="bg-[#f5f7ff]">
+        <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+          <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+            className="w-full px-2 py-1 rounded border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3]" />
+        </td>
+        <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+          <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as FundMemberRole }))}
+            className="w-full px-2 py-1 rounded border border-[#e8e6df] text-[12px] outline-none focus:border-[#2d5be3] bg-white">
+            {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </td>
+        <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+          <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+            placeholder="Title"
+            className="w-full px-2 py-1 rounded border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3]" />
+        </td>
+        <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+          <input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+            placeholder="email@company.com"
+            className="w-full px-2 py-1 rounded border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3]" />
+        </td>
+        <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+          <div className="flex gap-2">
+            <button disabled={saving} onClick={async () => {
+              setSaving(true);
+              await onUpdate({ name: form.name, email: form.email || undefined, role: form.role, title: form.title || undefined });
+              setSaving(false); setEditing(false);
+            }} className="text-[11.5px] text-[#2d5be3] hover:underline disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={() => setEditing(false)} className="text-[11.5px] text-[#9b9890] hover:underline">Cancel</button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr className="hover:bg-[#f9f8f5] transition-colors">
+      <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0"
+            style={{ background: coColor(member.name) }}>
+            {member.name.slice(0,2).toUpperCase()}
+          </div>
+          <span className="font-medium text-[12.5px]">{member.name}</span>
+        </div>
+      </td>
+      <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${ROLE_COLORS[member.role]}`}>
+          {member.role}
+        </span>
+      </td>
+      <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{member.title || '—'}</td>
+      <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{member.email || '—'}</td>
+      <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+        <div className="flex gap-3">
+          <button onClick={() => setEditing(true)} className="text-[11.5px] text-[#2d5be3] hover:underline">Edit</button>
+          <button onClick={async () => {
+            if (confirm(`Remove ${member.name} from this fund?`)) await onDelete();
+          }} className="text-[11.5px] text-red-500 hover:underline">Remove</button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const { id } = React.use(params);
   const searchParams = useSearchParams();
@@ -200,23 +293,29 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const [lps, setLPs] = useState<DbLP[]>([]);
   const [txns, setTxns] = useState<DbTransaction[]>([]);
   const [expenses, setExpenses] = useState<DbExpense[]>([]);
+  const [members, setMembers] = useState<DbFundMember[]>([]);
+  const [memberForm, setMemberForm] = useState<{ name: string; email: string; role: FundMemberRole; title: string } | null>(null);
+  const [memberSaving, setMemberSaving] = useState(false);
+  const [memberError, setMemberError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const [f, cos, lpsData, txnsData, expsData] = await Promise.all([
+        const [f, cos, lpsData, txnsData, expsData, membersData] = await Promise.all([
           getFundById(id),
           getCompaniesByFund(id),
           getLPsByFund(id),
           getTransactionsByFund(id),
           getExpensesByFund(id),
+          getFundMembers(id),
         ]);
         setFund(f);
         setCompanies(cos);
         setLPs(lpsData);
         setTxns(txnsData);
         setExpenses(expsData);
+        setMembers(membersData);
       } finally {
         setLoading(false);
       }
@@ -257,6 +356,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
     { key: 'lps',       label: 'Limited Partners' },
     { key: 'invested',  label: 'Invested Capital' },
     { key: 'expenses',  label: 'Expenses' },
+    { key: 'members',   label: 'Members' },
   ];
 
   return (
@@ -607,6 +707,161 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
           </div>
         </div>
       )}
+
+      {/* ══ MEMBERS ══ */}
+      {tab === 'members' && (
+        <div>
+          <p className="text-[12.5px] text-[#6b6860] mb-4">
+            Manage who has access to this fund and their roles.
+          </p>
+
+          {/* Role legend */}
+          <div className="bg-white border border-[#e8e6df] rounded-xl p-4 mb-4">
+            <div className="text-[12px] font-semibold text-[#6b6860] mb-3">Role Permissions</div>
+            <div className="grid grid-cols-3 gap-3">
+              {([
+                { role: 'GP',         color: 'bg-purple-100 text-purple-700', desc: 'Full access — create funds, approve investments, manage team' },
+                { role: 'Associate',  color: 'bg-blue-100 text-blue-700',     desc: 'Edit portfolio companies, add transactions, no fund creation' },
+                { role: 'Analyst',    color: 'bg-cyan-100 text-cyan-700',     desc: 'Read-only on portfolio & metrics, can add company updates' },
+                { role: 'Finance',    color: 'bg-amber-100 text-amber-700',   desc: 'Full LP data, capital calls, expenses & distributions' },
+                { role: 'LP Manager', color: 'bg-green-100 text-green-700',   desc: 'LP communication, capital call scheduling, read-only portfolio' },
+                { role: 'Viewer',     color: 'bg-gray-100 text-gray-600',     desc: 'Read-only dashboard, no sensitive LP data' },
+              ] as { role: FundMemberRole; color: string; desc: string }[]).map(r => (
+                <div key={r.role} className="flex gap-2 items-start">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap mt-0.5 ${r.color}`}>{r.role}</span>
+                  <span className="text-[11.5px] text-[#6b6860]">{r.desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white border border-[#e8e6df] rounded-xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
+              <div className="text-[13.5px] font-semibold">
+                Fund Members
+                <span className="text-[#9b9890] font-normal text-[12px] ml-2">({members.length})</span>
+              </div>
+              <button
+                onClick={() => { setMemberForm({ name: '', email: '', role: 'Viewer', title: '' }); setMemberError(null); }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors"
+              >
+                + Add Member
+              </button>
+            </div>
+
+            {/* Add member inline form */}
+            {memberForm !== null && (
+              <div className="px-5 py-4 border-b border-[#e8e6df] bg-[#f5f7ff]">
+                <div className="text-[12.5px] font-semibold mb-3">New Member</div>
+                {memberError && (
+                  <div className="bg-red-50 border border-red-200 rounded-[7px] px-3 py-2 text-[12px] text-red-700 mb-3">⚠️ {memberError}</div>
+                )}
+                <div className="grid grid-cols-4 gap-3 mb-3">
+                  <div>
+                    <label className="block text-[11.5px] font-medium mb-1">Name <span className="text-red-500">*</span></label>
+                    <input
+                      type="text" value={memberForm.name} placeholder="Full name"
+                      onChange={e => setMemberForm(f => f ? { ...f, name: e.target.value } : f)}
+                      className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11.5px] font-medium mb-1">Email</label>
+                    <input
+                      type="email" value={memberForm.email} placeholder="name@company.com"
+                      onChange={e => setMemberForm(f => f ? { ...f, email: e.target.value } : f)}
+                      className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11.5px] font-medium mb-1">Role <span className="text-red-500">*</span></label>
+                    <select
+                      value={memberForm.role}
+                      onChange={e => setMemberForm(f => f ? { ...f, role: e.target.value as FundMemberRole } : f)}
+                      className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3] bg-white"
+                    >
+                      {(['GP','Associate','Analyst','Finance','LP Manager','Viewer'] as FundMemberRole[]).map(r => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11.5px] font-medium mb-1">Title</label>
+                    <input
+                      type="text" value={memberForm.title} placeholder="e.g. Managing Partner"
+                      onChange={e => setMemberForm(f => f ? { ...f, title: e.target.value } : f)}
+                      className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3]"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!memberForm.name.trim()) { setMemberError('Name is required'); return; }
+                      setMemberSaving(true); setMemberError(null);
+                      try {
+                        await createFundMember({
+                          fund_id:   id,
+                          name:      memberForm.name.trim(),
+                          email:     memberForm.email || undefined,
+                          role:      memberForm.role,
+                          title:     memberForm.title || undefined,
+                          is_active: true,
+                        });
+                        setMembers(await getFundMembers(id));
+                        setMemberForm(null);
+                      } catch (err: any) {
+                        setMemberError(err.message ?? 'Failed to add member');
+                      } finally {
+                        setMemberSaving(false);
+                      }
+                    }}
+                    disabled={memberSaving}
+                    className="px-4 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] disabled:opacity-60 transition-colors"
+                  >
+                    {memberSaving ? 'Saving…' : 'Save Member'}
+                  </button>
+                  <button
+                    onClick={() => { setMemberForm(null); setMemberError(null); }}
+                    className="px-4 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <table className="w-full border-collapse">
+              <thead><tr>
+                {['Member','Role','Title','Email','Actions'].map(h => (
+                  <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {members.length === 0 ? (
+                  <tr><td colSpan={5} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">
+                    No members yet. Click "+ Add Member" to add your first team member.
+                  </td></tr>
+                ) : members.map(m => (
+                  <MemberRow
+                    key={m.id}
+                    member={m}
+                    onUpdate={async (updates) => {
+                      await updateFundMember(m.id, updates);
+                      setMembers(await getFundMembers(id));
+                    }}
+                    onDelete={async () => {
+                      await deleteFundMember(m.id);
+                      setMembers(await getFundMembers(id));
+                    }}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Import Modal */}
       {importModal && (
         <ImportModal

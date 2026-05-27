@@ -48,6 +48,7 @@ export type DbLP = {
   status: 'Active' | 'Inactive' | 'Pending';
   join_date?: string;
   notes?: string;
+  gp_contact?: string; 
   created_at: string;
   updated_at: string;
 };
@@ -84,7 +85,7 @@ export type DbCompany = {
   investment_date?: string;
   headline?: string;
   about?: string;
-  notes?: string;
+  notes?: string;   
   invested: number;
   unrealised: number;
   distributions: number;
@@ -144,6 +145,23 @@ export type DbCompanyUpdate = {
   is_public: boolean;
   created_by?: string;
   created_at: string;
+};
+
+
+// ─── FUND MEMBERS ─────────────────────────────────────────────
+
+export type FundMemberRole = 'GP' | 'Associate' | 'Analyst' | 'Finance' | 'LP Manager' | 'Viewer';
+
+export type DbFundMember = {
+  id: string;
+  fund_id: string;
+  name: string;
+  email?: string;
+  role: FundMemberRole;
+  title?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 // ─── FUNDS ───────────────────────────────────────────────────
@@ -488,6 +506,68 @@ export async function createCompanyUpdate(
 
 export async function deleteCompanyUpdate(id: string): Promise<void> {
   const { error } = await supabase.from('company_updates').delete().eq('id', id);
+  if (error) throw error;
+}
+
+
+// ─── FUND MEMBERS ─────────────────────────────────────────────
+
+export async function getFundMembers(fundId: string): Promise<DbFundMember[]> {
+  const { data, error } = await supabase
+    .from('fund_members')
+    .select('*')
+    .eq('fund_id', fundId)
+    .eq('is_active', true)
+    .order('role')
+    .order('name');
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getFundMembersByRole(fundId: string, role: FundMemberRole): Promise<DbFundMember[]> {
+  const { data, error } = await supabase
+    .from('fund_members')
+    .select('*')
+    .eq('fund_id', fundId)
+    .eq('role', role)
+    .eq('is_active', true)
+    .order('name');
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function createFundMember(
+  member: Omit<DbFundMember, 'id' | 'created_at' | 'updated_at'>
+): Promise<DbFundMember> {
+  const { data, error } = await supabase
+    .from('fund_members')
+    .insert(member)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateFundMember(
+  id: string,
+  updates: Partial<Pick<DbFundMember, 'name' | 'email' | 'role' | 'title' | 'is_active'>>
+): Promise<DbFundMember> {
+  const { data, error } = await supabase
+    .from('fund_members')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteFundMember(id: string): Promise<void> {
+  // Soft-delete: mark inactive rather than hard delete to preserve audit trail
+  const { error } = await supabase
+    .from('fund_members')
+    .update({ is_active: false })
+    .eq('id', id);
   if (error) throw error;
 }
 
