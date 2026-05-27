@@ -249,7 +249,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   };
 
   const handleAddValuation = async () => {
-    if (!valForm.value) return;
+    if (!valForm.investmentValue) return;
     setSavingVal(true);
     try {
       const newValuation = Number(valForm.investmentValue);
@@ -300,7 +300,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       ]);
       setVals(v);
       if (co) setCompany(co);
-      setValForm({ quarter: 'Q1 2026', value: '', moic: '', irr: '', round: '', notes: '' });
+      setValForm({ date: new Date().toISOString().split('T')[0], quarter: 'Q1 2026', investmentValue: '', companyValue: '', method: 'Recent Funding Round', round: '', notes: '' });
       setShowValForm(false);
     } catch (err: any) {
       alert('Failed to add valuation: ' + err.message);

@@ -69,6 +69,7 @@ export type DbCompany = {
   fund_id: string;
   name: string;
   sector?: string;
+  legal_name?: string; 
   stage?: string;
   website?: string;
   status: 'Active' | 'Exited' | 'Written Off';
