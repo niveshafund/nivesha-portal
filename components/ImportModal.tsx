@@ -42,7 +42,7 @@ const INVESTMENT_COLS = [
   'Fund Name*', 'Company Name*', 'Transaction Type*',
   'Instrument*', 'Amount*', 'Date* (YYYY-MM-DD)',
   'Currency*', 'Sector', 'Round', 'Security Type',
-  'Post-Money Valuation', 'Pre-Money Valuation',
+  'Valuation Cap', 'Post-Money Valuation', 'Pre-Money Valuation',
   'SAFE Structure', 'Discount %',
   'CEO Full Name', 'CEO Email', 'CEO Phone',
 ];
@@ -338,15 +338,21 @@ export default function ImportModal({ type, fundId, onClose, onDone }: Props) {
             }
           }
 
+          const discountPct  = row['Discount %']    ? Number(row['Discount %'])    : null;
+          const valuationCap = row['Valuation Cap'] ? Number(row['Valuation Cap']) : 
+                               row['Post-Money Valuation'] ? Number(row['Post-Money Valuation']) : null;
+
           const { error: txErr } = await supabase.from('transactions').insert({
-            fund_id:      fundId,
-            company_id:   companyId,
-            company_name: companyName,
+            fund_id:       fundId,
+            company_id:    companyId,
+            company_name:  companyName,
             date,
-            type:         txnType.charAt(0).toUpperCase() + txnType.slice(1).toLowerCase(),
+            type:          txnType.charAt(0).toUpperCase() + txnType.slice(1).toLowerCase(),
             amount,
-            instrument:   normalizeInstrument(row['Instrument*'] || row['Instrument'] || ''),
-            description:  buildDesc(),
+            instrument:    normalizeInstrument(row['Instrument*'] || row['Instrument'] || ''),
+            description:   buildDesc(),
+            discount_pct:  discountPct,
+            valuation_cap: valuationCap,
           });
           if (txErr) throw new Error(txErr.message);
         }

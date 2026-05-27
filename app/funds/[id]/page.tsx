@@ -88,7 +88,7 @@ function InvestedCapitalGrouped({ txns, fundId, onImport }: GroupedTxnProps) {
           <table className="w-full border-collapse">
             <thead>
               <tr>
-                {['Company', 'Rounds', 'Total Invested', 'Latest Date', 'Status'].map(h => (
+                {['Company', 'Rounds', 'Discount %', 'Valuation Cap', 'Total Invested', 'Latest Date'].map(h => (
                   <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -107,6 +107,12 @@ function InvestedCapitalGrouped({ txns, fundId, onImport }: GroupedTxnProps) {
                     label: `${t.instrument || 'Investment'} · ${fmtShort(t.amount)} · ${t.date?.slice(0, 4) ?? ''}`,
                     id: t.id,
                   }));
+
+                // Aggregate discount % and valuation cap across all investment rounds
+                // For multi-round: show latest round's terms; for single: show directly
+                const latestInv = investments.sort((a, b) => b.date.localeCompare(a.date))[0];
+                const discountPct  = latestInv?.discount_pct  ?? null;
+                const valuationCap = latestInv?.valuation_cap ?? null;
 
                 return (
                   <tr key={g.company_name} className="hover:bg-[#f9f8f5] transition-colors">
@@ -154,6 +160,20 @@ function InvestedCapitalGrouped({ txns, fundId, onImport }: GroupedTxnProps) {
                       </div>
                     </td>
 
+                    {/* Discount % */}
+                    <td className="px-4 py-3 border-b border-[#e8e6df] text-[12px] whitespace-nowrap">
+                      {discountPct != null
+                        ? <span className="font-medium text-amber-700">{discountPct}%</span>
+                        : <span className="text-[#9b9890]">—</span>}
+                    </td>
+
+                    {/* Valuation Cap */}
+                    <td className="px-4 py-3 border-b border-[#e8e6df] text-[12px] font-mono whitespace-nowrap">
+                      {valuationCap != null
+                        ? <span className="text-[#1a1917]">{fmtShort(valuationCap)}</span>
+                        : <span className="text-[#9b9890]">—</span>}
+                    </td>
+
                     {/* Total invested */}
                     <td className="px-4 py-3 border-b border-[#e8e6df] font-mono text-[13px] font-semibold text-red-600 whitespace-nowrap">
                       -{fmtShort(totalInv)}
@@ -162,13 +182,6 @@ function InvestedCapitalGrouped({ txns, fundId, onImport }: GroupedTxnProps) {
                     {/* Latest date */}
                     <td className="px-4 py-3 border-b border-[#e8e6df] text-[12px] text-[#6b6860] whitespace-nowrap">
                       {latestDate}
-                    </td>
-
-                    {/* Status — derived from company txns (always Active for invested companies) */}
-                    <td className="px-4 py-3 border-b border-[#e8e6df]">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-50 text-green-700">
-                        Active
-                      </span>
                     </td>
                   </tr>
                 );
@@ -485,107 +498,193 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
       )}
 
       {/* ══ PORTFOLIO ══ */}
-      {tab === 'portfolio' && (
-        <div>
-          <p className="text-[12.5px] text-[#6b6860] mb-4">
-            Portfolio companies associated with this fund.
-          </p>
-          <div className="bg-white border border-[#e8e6df] rounded-xl">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
-              <div className="text-[13.5px] font-semibold">Portfolio Companies <span className="text-[#9b9890] font-normal text-[12px]">({companies.length})</span></div>
-              <div className="flex gap-2">
-                <button onClick={() => setImportModal('companies')} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↑ Import</button>
-                <Link href={`/funds/${id}/investments/new`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">+ Add Company</Link>
+      {tab === 'portfolio' && (() => {
+        // Build transaction-level rows — one row per Investment transaction
+        // MOIC = Current Valuation / Entry Valuation (valuation_cap at time of investment)
+        // DPI  = Distributions / Invested (realised returns only)
+        // IRR  = shown as — (requires XIRR; avoided to prevent wrong numbers)
+
+        // Build lookup maps from live txns
+        const investmentTxns = txns
+          .filter(t => t.type === 'Investment' && t.company_id)
+          .sort((a, b) => a.date.localeCompare(b.date)); // oldest first
+
+        const distribByCompany = txns
+          .filter(t => t.type === 'Distribution' && t.company_id)
+          .reduce<Record<string, number>>((acc, t) => {
+            acc[t.company_id!] = (acc[t.company_id!] || 0) + t.amount;
+            return acc;
+          }, {});
+
+        // Company lookup by id
+        const companyMap = Object.fromEntries(companies.map(c => [c.id, c]));
+
+        // Build one row per investment transaction
+        const rows = investmentTxns.map(t => {
+          const co           = companyMap[t.company_id!];
+          const entryVal     = t.valuation_cap ?? null;        // valuation at investment
+          const currentVal   = co?.unrealised ?? 0;             // latest valuation
+          const distribAmt   = distribByCompany[t.company_id!] ?? 0;
+          // MOIC = current company valuation / entry valuation cap
+          // Only meaningful if we have both values
+          const moic = (entryVal && entryVal > 0 && currentVal > 0)
+            ? currentVal / entryVal
+            : null;
+          // DPI = total distributions for this company / this transaction's invested amount
+          const dpi = t.amount > 0 && distribAmt > 0 ? distribAmt / t.amount : null;
+          return { t, co, entryVal, currentVal, distribAmt, moic, dpi };
+        });
+
+        // Footer totals
+        const totalInvested    = rows.reduce((s, r) => s + r.t.amount, 0);
+        const totalCurrentVal  = rows.reduce((s, r) => s + (r.currentVal || 0), 0);
+        const totalDistrib     = Object.values(distribByCompany).reduce((s, v) => s + v, 0);
+
+        return (
+          <div>
+            <p className="text-[12.5px] text-[#6b6860] mb-4">
+              One row per investment transaction. MOIC = Current Valuation ÷ Entry Valuation.
+            </p>
+            <div className="bg-white border border-[#e8e6df] rounded-xl">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
+                <div className="text-[13.5px] font-semibold">
+                  Portfolio Companies
+                  <span className="text-[#9b9890] font-normal text-[12px] ml-2">
+                    ({companies.length} compan{companies.length !== 1 ? 'ies' : 'y'} · {rows.length} investment{rows.length !== 1 ? 's' : ''})
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setImportModal('companies')} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↑ Import</button>
+                  <Link href={`/funds/${id}/investments/new`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">+ Add Company</Link>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr>
+                      {['Company','Sector','Date','Instrument','Invested','Entry Valuation','Current Valuation','Distributions','MOIC','DPI','Status'].map(h => (
+                        <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 ? (
+                      <tr><td colSpan={11} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">
+                        No investments yet. Click "+ Add Company" to record your first investment.
+                      </td></tr>
+                    ) : rows.map(({ t, co, entryVal, currentVal, distribAmt, moic, dpi }) => (
+                      <tr key={t.id} className="hover:bg-[#f9f8f5] transition-colors">
+                        {/* Company */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-[5px] flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0"
+                              style={{ background: coColor(t.company_name) }}>
+                              {t.company_name.slice(0, 2).toUpperCase()}
+                            </div>
+                            {co ? (
+                              <a href={`/funds/${id}/companies/${co.id}?from=portfolio`}
+                                className="font-medium text-[12.5px] text-[#2d5be3] hover:underline">
+                                {t.company_name}
+                              </a>
+                            ) : (
+                              <span className="font-medium text-[12.5px]">{t.company_name}</span>
+                            )}
+                          </div>
+                        </td>
+                        {/* Sector */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">
+                          {co?.sector || '—'}
+                        </td>
+                        {/* Date */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860] whitespace-nowrap">
+                          {t.date}
+                        </td>
+                        {/* Instrument */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#f9f8f5] text-[#6b6860] border border-[#e8e6df] whitespace-nowrap">
+                            {t.instrument}
+                          </span>
+                        </td>
+                        {/* Invested */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">
+                          {fmtFull(t.amount)}
+                        </td>
+                        {/* Entry Valuation */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">
+                          {entryVal ? fmtFull(entryVal) : '—'}
+                        </td>
+                        {/* Current Valuation */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">
+                          {currentVal > 0 ? fmtFull(currentVal) : '—'}
+                        </td>
+                        {/* Distributions */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">
+                          {distribAmt > 0
+                            ? <span className="text-green-600">{fmtFull(distribAmt)}</span>
+                            : '—'}
+                        </td>
+                        {/* MOIC = Current Val / Entry Val */}
+                        <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${moic != null ? moicColor(moic) : 'text-[#9b9890]'}`}>
+                          {moic != null ? `${moic.toFixed(2)}x` : '—'}
+                        </td>
+                        {/* DPI = Distributions / Invested */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">
+                          {dpi != null ? `${dpi.toFixed(2)}x` : '—'}
+                        </td>
+                        {/* Status */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                            co?.status === 'Active'  ? 'bg-green-50 text-green-700' :
+                            co?.status === 'Exited'  ? 'bg-blue-50 text-blue-700'  :
+                                                       'bg-red-50 text-red-700'
+                          }`}>{co?.status ?? 'Active'}</span>
+                        </td>
+                      </tr>
+                    ))}
+                    {/* ── Footer totals row ── */}
+                    {rows.length > 0 && (
+                      <tr className="bg-[#f9f8f5] text-[12px] font-medium border-t-2 border-[#e8e6df]">
+                        <td className="px-4 py-3 text-[#6b6860]" colSpan={4}>
+                          {rows.length} investment{rows.length !== 1 ? 's' : ''} · {companies.length} compan{companies.length !== 1 ? 'ies' : 'y'}
+                        </td>
+                        {/* Total Invested */}
+                        <td className="px-4 py-3 font-mono font-semibold">{fmtFull(totalInvested)}</td>
+                        {/* Entry Valuation total — sum of all entry caps */}
+                        <td className="px-4 py-3 font-mono text-[#6b6860]">
+                          {rows.some(r => r.entryVal) ? fmtFull(rows.reduce((s, r) => s + (r.entryVal || 0), 0)) : '—'}
+                        </td>
+                        {/* Total Current Valuation */}
+                        <td className="px-4 py-3 font-mono font-semibold text-green-700">
+                          {totalCurrentVal > 0 ? fmtFull(totalCurrentVal) : '—'}
+                        </td>
+                        {/* Total Distributions */}
+                        <td className="px-4 py-3 font-mono font-semibold text-green-600">
+                          {totalDistrib > 0 ? fmtFull(totalDistrib) : '—'}
+                        </td>
+                        {/* Blended MOIC across portfolio */}
+                        <td className="px-4 py-3">
+                          {(() => {
+                            const totalEntryVal = rows.reduce((s, r) => s + (r.entryVal || 0), 0);
+                            const blended = totalEntryVal > 0 && totalCurrentVal > 0 ? totalCurrentVal / totalEntryVal : null;
+                            return blended != null
+                              ? <span className={moicColor(blended)}>{blended.toFixed(2)}x</span>
+                              : '—';
+                          })()}
+                        </td>
+                        {/* DPI total */}
+                        <td className="px-4 py-3 text-[#6b6860]">
+                          {totalInvested > 0 && totalDistrib > 0 ? `${(totalDistrib / totalInvested).toFixed(2)}x` : '—'}
+                        </td>
+                        <td className="px-4 py-3" />
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead><tr>
-                  {['Company','Sector','Invested','Valuation','Distributions','MOIC','DPI','IRR','Status'].map(h => (
-                    <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {companies.length === 0 ? (
-                    <tr><td colSpan={9} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">
-                      No companies yet. Click "Add Company" to record your first investment.
-                    </td></tr>
-                  ) : (() => {
-                    // Sum Investment and Distribution transactions per company from live txns.
-                    // co.invested is written at creation only and goes stale on follow-ons.
-                    const investedByCompany = txns
-                      .filter(t => t.type === 'Investment' && t.company_id)
-                      .reduce<Record<string, number>>((acc, t) => {
-                        acc[t.company_id!] = (acc[t.company_id!] || 0) + t.amount;
-                        return acc;
-                      }, {});
-                    const distribByCompany = txns
-                      .filter(t => t.type === 'Distribution' && t.company_id)
-                      .reduce<Record<string, number>>((acc, t) => {
-                        acc[t.company_id!] = (acc[t.company_id!] || 0) + t.amount;
-                        return acc;
-                      }, {});
-
-                    return companies.map(co => {
-                      const investedAmt = investedByCompany[co.id] ?? co.invested;
-                      const distribAmt  = distribByCompany[co.id] ?? 0;
-                      // DPI = total distributions / invested capital
-                      const dpi = investedAmt > 0 ? distribAmt / investedAmt : 0;
-
-                      return (
-                        <tr key={co.id} className="hover:bg-[#f9f8f5] transition-colors cursor-pointer">
-                          {/* Company */}
-                          <td className="px-4 py-2.5 border-b border-[#e8e6df]">
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-[5px] flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0"
-                                style={{ background: coColor(co.name) }}>
-                                {co.name.slice(0, 2).toUpperCase()}
-                              </div>
-                              <a href={`/funds/${id}/companies/${co.id}?from=portfolio`} className="font-medium text-[12.5px] text-[#2d5be3] hover:underline">{co.name}</a>
-                            </div>
-                          </td>
-                          {/* Sector */}
-                          <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{co.sector || '—'}</td>
-                          {/* Invested */}
-                          <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtFull(investedAmt)}</td>
-                          {/* Valuation (unrealised) */}
-                          <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">
-                            {co.unrealised > 0 ? fmtFull(co.unrealised) : '—'}
-                          </td>
-                          {/* Distributions */}
-                          <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">
-                            {distribAmt > 0 ? <span className="text-green-600">{fmtFull(distribAmt)}</span> : '—'}
-                          </td>
-                          {/* MOIC */}
-                          <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${moicColor(co.moic)}`}>
-                            {co.moic > 0 ? `${co.moic.toFixed(2)}x` : '—'}
-                          </td>
-                          {/* DPI */}
-                          <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">
-                            {dpi > 0 ? `${dpi.toFixed(2)}x` : '—'}
-                          </td>
-                          {/* IRR */}
-                          <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${irrColor(co.irr)}`}>
-                            {co.irr !== 0 ? `${co.irr.toFixed(1)}%` : '—'}
-                          </td>
-                          {/* Status */}
-                          <td className="px-4 py-2.5 border-b border-[#e8e6df]">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                              co.status === 'Active'  ? 'bg-green-50 text-green-700' :
-                              co.status === 'Exited'  ? 'bg-blue-50 text-blue-700'  :
-                                                        'bg-red-50 text-red-700'
-                            }`}>{co.status}</span>
-                          </td>
-                        </tr>
-                      );
-                    });
-                  })()}
-                </tbody>
-              </table>
-            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ══ LIMITED PARTNERS ══ */}
       {tab === 'lps' && (() => {
@@ -725,18 +824,31 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                         </td>
                       </tr>
                     ))}
+                  {/* ── Footer totals row — inside same table for column alignment ── */}
+                  {lps.length > 0 && (
+                    <tr className="text-[12px] border-t border-[#e8e6df] bg-[#f9f8f5]">
+                      <td className="px-4 py-3 text-[#6b6860] font-medium">
+                        {lps.length} LP{lps.length !== 1 ? 's' : ''}
+                      </td>
+                      <td className="px-4 py-3" />
+                      <td className="px-4 py-3 font-mono font-semibold">
+                        {fmtFull(lps.reduce((s, lp) => s + lp.commitment, 0))}
+                      </td>
+                      <td className="px-4 py-3 font-mono font-semibold">
+                        {fmtFull(lps.reduce((s, lp) => s + lp.called, 0))}
+                      </td>
+                      <td className="px-4 py-3 font-mono font-semibold">
+                        {lps.reduce((s, lp) => s + lp.distributions, 0) > 0
+                          ? fmtFull(lps.reduce((s, lp) => s + lp.distributions, 0))
+                          : <span className="text-[#9b9890]">—</span>}
+                      </td>
+                      <td className="px-4 py-3" />
+                      <td className="px-4 py-3" />
+                    </tr>
+                  )}
                   </tbody>
                 </table>
               </div>
-              {/* LP summary totals */}
-              {lps.length > 0 && (
-                <div className="px-5 py-3 border-t border-[#e8e6df] bg-[#f9f8f5] grid grid-cols-4 gap-4 text-[12px]">
-                  <div><span className="text-[#6b6860]">Total Commitment: </span><span className="font-mono font-semibold">{fmtFull(lps.reduce((s,lp)=>s+lp.commitment,0))}</span></div>
-                  <div><span className="text-[#6b6860]">Total Called: </span><span className="font-mono font-semibold">{fmtFull(lps.reduce((s,lp)=>s+lp.called,0))}</span></div>
-                  <div><span className="text-[#6b6860]">Total Distributions: </span><span className="font-mono font-semibold">{fmtFull(lps.reduce((s,lp)=>s+lp.distributions,0))}</span></div>
-                  <div><span className="text-[#6b6860]">LP Count: </span><span className="font-semibold">{lps.length}</span></div>
-                </div>
-              )}
             </div>
           </div>
         );

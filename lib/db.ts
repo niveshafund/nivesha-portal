@@ -48,7 +48,7 @@ export type DbLP = {
   status: 'Active' | 'Inactive' | 'Pending';
   join_date?: string;
   notes?: string;
-  gp_contact?: string; 
+  gp_contact?: string;  
   created_at: string;
   updated_at: string;
 };
@@ -78,6 +78,7 @@ export type DbCompany = {
   country?: string;
   contact_name?: string;
   contact_email?: string;
+  contact_phone?: string;
   security_type?: string;
   round?: string;
   valuation?: number;
@@ -106,6 +107,8 @@ export type DbTransaction = {
   instrument: 'Equity' | 'Convertible Note' | 'SAFE' | 'Preferred Stock' | 'Other';
   description?: string;
   notes?: string;
+  discount_pct?: number;
+  valuation_cap?: number;
   created_at: string;
 };
 

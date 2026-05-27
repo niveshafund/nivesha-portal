@@ -39,6 +39,7 @@ const SECTORS = [
 
 type Form = {
   companyName: string;
+  legalName: string;
   entityType: string;
   jurisdictionType: 'US Based' | 'Non-US Based';
   usState: string;
@@ -62,6 +63,7 @@ type Form = {
 
 const empty: Form = {
   companyName: '',
+  legalName: '',
   entityType: 'C Corporation',
   jurisdictionType: 'US Based',
   usState: '',
@@ -85,21 +87,17 @@ const empty: Form = {
 
 type Errors = Partial<Record<keyof Form, string>>;
 
-
 // Build investment terms string for the Description column
 function buildInvestmentTerms(form: any): string | undefined {
   const parts: string[] = [];
-  // For SAFE: show structure and discount (skip "SAFE" prefix — instrument column has it)
   if (form.securityType === 'SAFE') {
     if (form.safeType) parts.push(form.safeType);
     if (form.discount) parts.push(`${form.discount}% discount`);
   }
-  // Valuation
   if (form.valuation) {
     const val = Number(form.valuation);
     parts.push(`${form.valuationType} valuation cap: $${val.toLocaleString()}`);
   }
-  // Round
   if (form.round) parts.push(form.round);
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }
@@ -142,6 +140,7 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
       const company = await createCompany({
         fund_id:         id,
         name:            form.companyName.trim(),
+        legal_name:      form.legalName.trim() || undefined,
         sector:          form.sector     || undefined,
         stage:           form.round      || undefined,
         website:         form.website    || undefined,
@@ -152,6 +151,7 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
         country:         form.jurisdictionType === 'Non-US Based' ? form.country  : undefined,
         contact_name:    form.ceoName  || undefined,
         contact_email:   form.ceoEmail || undefined,
+        contact_phone:   form.ceoPhone || undefined,
         security_type:   form.securityType || undefined,
         round:           form.round        || undefined,
         valuation:       form.valuation ? Number(form.valuation) : undefined,
@@ -170,19 +170,22 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
       });
 
       // Step 2 — Record investment transaction
+      // discount_pct and valuation_cap are now saved as proper numeric columns
       await createTransaction({
-        fund_id:      id,
-        company_id:   company.id,
-        company_name: form.companyName.trim(),
-        date:         form.investmentDate,
-        type:         'Investment',
-        amount:       Number(form.amount),
-        instrument:   (form.securityType as any) || 'Other',
-        description:  buildInvestmentTerms(form),
-        notes:        form.about || undefined,
+        fund_id:       id,
+        company_id:    company.id,
+        company_name:  form.companyName.trim(),
+        date:          form.investmentDate,
+        type:          'Investment',
+        amount:        Number(form.amount),
+        instrument:    (form.securityType as any) || 'Other',
+        description:   buildInvestmentTerms(form),
+        notes:         form.about || undefined,
+        discount_pct:  form.discount ? Number(form.discount) : undefined,
+        valuation_cap: form.valuation ? Number(form.valuation) : undefined,
       });
 
-      router.push('/funds/' + id);
+      router.push('/funds/' + id + '?tab=invested');
     } catch (err: any) {
       console.error('Save investment error:', err);
       setErrors({ companyName: err.message ?? 'Failed to save. Please try again.' });
@@ -199,28 +202,36 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
   const SectionHeader = ({ num, title, sub }: { num: number; title: string; sub: string }) => (
     <div className="flex items-start gap-3 mb-5">
       <div className="w-6 h-6 rounded-full bg-[#2d5be3] text-white text-[11px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{num}</div>
-      <div><h2 className="text-[15px] font-semibold">{title}</h2><p className="text-[12px] text-[#9b9890] mt-0.5">{sub}</p></div>
+      <div><div className="text-[14px] font-semibold">{title}</div><div className="text-[12px] text-[#9b9890]">{sub}</div></div>
     </div>
   );
 
   return (
     <div className="max-w-3xl">
       <div className="flex items-center gap-3 mb-6">
-        <Link href={'/funds/' + id} className="w-7 h-7 flex items-center justify-center rounded-full border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors text-[#6b6860]">←</Link>
+        <Link href={`/funds/${id}`} className="w-7 h-7 flex items-center justify-center rounded-full border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors text-[#6b6860]">←</Link>
         <div>
-          <h1 className="text-[20px] font-semibold tracking-tight">Create Investment</h1>
-          <p className="text-[12.5px] text-[#6b6860] mt-0.5">Add a new portfolio company investment</p>
+          <h1 className="text-[20px] font-semibold tracking-tight">New Company Investment</h1>
+          <p className="text-[12.5px] text-[#6b6860] mt-0.5">Record a new portfolio company and initial investment</p>
         </div>
       </div>
 
       {/* SECTION 1 — Company Details */}
       <div className="bg-white border border-[#e8e6df] rounded-xl p-6 mb-4">
-        <SectionHeader num={1} title="Company Details" sub="Legal information about the portfolio company" />
+        <SectionHeader num={1} title="Company Details" sub="Legal entity and contact information" />
 
-        <div className="mb-5">
-          <label className="block text-[13px] font-medium mb-1">Company Legal Name <span className="text-red-500">*</span></label>
-          <input type="text" value={form.companyName} onChange={set('companyName')} placeholder="e.g., Swirepay Inc." className={inputCls('companyName')} />
-          {errors.companyName && <p className="text-[11px] text-red-500 mt-1">{errors.companyName}</p>}
+        <div className="grid grid-cols-2 gap-4 mb-5">
+          <div>
+            <label className="block text-[13px] font-medium mb-1">Company Name <span className="text-red-500">*</span></label>
+            <input type="text" value={form.companyName} onChange={set('companyName')} placeholder="e.g., Acme" className={inputCls('companyName')} />
+            <p className="text-[11px] text-[#9b9890] mt-1">Public / trading name</p>
+            {errors.companyName && <p className="text-[11px] text-red-500 mt-1">{errors.companyName}</p>}
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium mb-1">Legal Name <span className="text-[#9b9890] font-normal">(optional)</span></label>
+            <input type="text" value={form.legalName} onChange={set('legalName')} placeholder="e.g., Acme Technologies Inc." className={inputCls('legalName')} />
+            <p className="text-[11px] text-[#9b9890] mt-1">Registered legal entity name</p>
+          </div>
         </div>
 
         <div className="mb-5">
@@ -236,7 +247,7 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
         </div>
 
         <div className="mb-5">
-          <label className="block text-[13px] font-medium mb-2">Company Jurisdiction</label>
+          <label className="block text-[13px] font-medium mb-2">Jurisdiction</label>
           <div className="flex gap-2 mb-3">
             {(['US Based', 'Non-US Based'] as const).map(j => (
               <button key={j} type="button" onClick={() => setVal('jurisdictionType', j)}
@@ -247,6 +258,7 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
           </div>
           {form.jurisdictionType === 'US Based' ? (
             <div>
+              <label className="block text-[13px] font-medium mb-1">State of Incorporation <span className="text-red-500">*</span></label>
               <select value={form.usState} onChange={set('usState')} className={inputCls('usState')}>
                 <option value="">Select state…</option>
                 {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
@@ -255,6 +267,7 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
             </div>
           ) : (
             <div>
+              <label className="block text-[13px] font-medium mb-1">Country <span className="text-red-500">*</span></label>
               <select value={form.country} onChange={set('country')} className={inputCls('country')}>
                 <option value="">Select country…</option>
                 {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -266,25 +279,24 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
 
         <div className="mb-5">
           <label className="block text-[13px] font-medium mb-1">Website <span className="text-[#9b9890] font-normal">(optional)</span></label>
-          <input type="url" value={form.website} onChange={set('website')} placeholder="https://example.com" className={inputCls('website')} />
+          <input type="url" value={form.website} onChange={set('website')} placeholder="https://company.com" className={inputCls('website')} />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-[13px] font-medium mb-1">CEO Full Name <span className="text-red-500">*</span></label>
-            <input type="text" value={form.ceoName} onChange={set('ceoName')} placeholder="e.g., John Smith" className={inputCls('ceoName')} />
+        <div className="grid grid-cols-3 gap-4">
+          <div className="col-span-1">
+            <label className="block text-[13px] font-medium mb-1">CEO / Contact Name <span className="text-red-500">*</span></label>
+            <input type="text" value={form.ceoName} onChange={set('ceoName')} placeholder="Full name" className={inputCls('ceoName')} />
             {errors.ceoName && <p className="text-[11px] text-red-500 mt-1">{errors.ceoName}</p>}
           </div>
           <div>
-            <label className="block text-[13px] font-medium mb-1">CEO Email <span className="text-red-500">*</span></label>
-            <input type="email" value={form.ceoEmail} onChange={set('ceoEmail')} placeholder="founder@company.com" className={inputCls('ceoEmail')} />
+            <label className="block text-[13px] font-medium mb-1">Email <span className="text-red-500">*</span></label>
+            <input type="email" value={form.ceoEmail} onChange={set('ceoEmail')} placeholder="ceo@company.com" className={inputCls('ceoEmail')} />
             {errors.ceoEmail && <p className="text-[11px] text-red-500 mt-1">{errors.ceoEmail}</p>}
           </div>
-        </div>
-
-        <div className="mt-4">
-          <label className="block text-[13px] font-medium mb-1">CEO Phone <span className="text-[#9b9890] font-normal">(optional)</span></label>
-          <input type="tel" value={form.ceoPhone} onChange={set('ceoPhone')} placeholder="+1 (555) 000-0000" className={inputCls('ceoPhone')} />
+          <div>
+            <label className="block text-[13px] font-medium mb-1">Phone <span className="text-[#9b9890] font-normal">(optional)</span></label>
+            <input type="tel" value={form.ceoPhone} onChange={set('ceoPhone')} placeholder="+1 (555) 000-0000" className={inputCls('ceoPhone')} />
+          </div>
         </div>
       </div>
 
@@ -305,7 +317,7 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
           {errors.securityType && <p className="text-[11px] text-red-500 mt-1">{errors.securityType}</p>}
         </div>
 
-        {/* SAFE sub-type — only shown when SAFE is selected */}
+        {/* SAFE sub-type */}
         {form.securityType === 'SAFE' && (
           <div className="mb-5 pl-4 border-l-2 border-[#2d5be3]">
             <label className="block text-[13px] font-medium mb-2">SAFE Structure <span className="text-red-500">*</span></label>
@@ -313,28 +325,18 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
               {SAFE_TYPES.map(t => (
                 <button key={t} type="button" onClick={() => setVal('safeType', t)}
                   className={'px-3 py-2 rounded-[7px] text-[12.5px] font-medium border transition-all text-left ' +
-                    (form.safeType === t
-                      ? 'bg-[#2d5be3] text-white border-[#2d5be3]'
-                      : 'bg-white text-[#6b6860] border-[#e8e6df] hover:border-[#2d5be3] hover:text-[#2d5be3]')}>
+                    (form.safeType === t ? 'bg-[#2d5be3] text-white border-[#2d5be3]' : 'bg-white text-[#6b6860] border-[#e8e6df] hover:border-[#2d5be3] hover:text-[#2d5be3]')}>
                   {t}
                 </button>
               ))}
             </div>
-            {/* Discount % — shown when discount is part of structure */}
             {(form.safeType === 'with valuation cap and discount' || form.safeType === 'with discount, no valuation cap') && (
               <div className="max-w-xs">
                 <label className="block text-[13px] font-medium mb-1">Discount %</label>
                 <div className="relative">
-                  <input
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    max="50"
-                    value={form.discount}
-                    onChange={set('discount')}
+                  <input type="number" step="0.5" min="0" max="50" value={form.discount} onChange={set('discount')}
                     placeholder="e.g., 20"
-                    className="w-full px-3 py-2.5 pr-7 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] font-sans outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 transition-colors"
-                  />
+                    className="w-full px-3 py-2.5 pr-7 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] font-sans outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 transition-colors" />
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[13px]">%</span>
                 </div>
                 <p className="text-[11.5px] text-[#9b9890] mt-1">Discount applied at conversion (typically 15–20%)</p>
@@ -375,7 +377,7 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
         </div>
 
         <div>
-          <label className="block text-[13px] font-medium mb-2">Valuation</label>
+          <label className="block text-[13px] font-medium mb-2">Valuation <span className="text-[#9b9890] font-normal text-[12px]">(saved as valuation cap)</span></label>
           <div className="flex gap-3 items-start">
             <div className="flex-1">
               <div className="relative">
