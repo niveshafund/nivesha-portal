@@ -28,9 +28,9 @@ type Props = {
 const LP_COLS = [
   'Investor Name*', 'Investing As', 'Commitment Amount*', 'Currency*',
   'Called Capital', 'Distributions',
-  'Commitment Date', 'Email', 'Phone',
+  'Commitment Date', 'Email', 'Phone', 'GP Contact',
   'Address Line 1', 'Address Line 2', 'City', 'State', 'ZIP Code', 'Country',
-  'Contact Name', 'Notes',
+  'Notes',
 ];
 
 const COMPANY_COLS = [
@@ -223,6 +223,7 @@ export default function ImportModal({ type, fundId, onClose, onDone }: Props) {
             zip:           row['ZIP Code'] || null,
             country:       row['Country'] || 'USA',
             notes:         notesVal,
+            gp_contact:    row['GP Contact'] || null,
           }).select().single();
           if (error) throw new Error(error.message);
 

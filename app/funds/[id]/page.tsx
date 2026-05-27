@@ -297,6 +297,8 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const [memberForm, setMemberForm] = useState<{ name: string; email: string; role: FundMemberRole; title: string } | null>(null);
   const [memberSaving, setMemberSaving] = useState(false);
   const [memberError, setMemberError] = useState<string | null>(null);
+  const [lpSearch, setLpSearch] = useState('');
+  const [lpSort, setLpSort] = useState<'name-az' | 'name-za' | 'commitment-desc' | 'commitment-asc' | 'called-desc'>('name-az');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -586,74 +588,159 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
       )}
 
       {/* ══ LIMITED PARTNERS ══ */}
-      {tab === 'lps' && (
-        <div>
-          {lps.length === 0 && (
-            <div className="bg-[#eef2fd] border border-[#c7d7f9] rounded-xl p-5 mb-5">
-              <div className="font-semibold text-[#2d5be3] mb-2">Getting Started</div>
-              <div className="space-y-2 text-[12.5px]">
-                <div className="flex gap-2"><span className="w-5 h-5 rounded-full bg-[#2d5be3] text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">1</span><div><strong>Add your Limited Partners</strong> — LP is an investor in your fund with their commitment and capital call details.</div></div>
-                <div className="flex gap-2"><span className="w-5 h-5 rounded-full bg-[#2d5be3] text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">2</span><div><strong>Record capital calls</strong> — Track each installment payment from LPs as they wire funds to the fund.</div></div>
-              </div>
-            </div>
-          )}
-          <div className="bg-white border border-[#e8e6df] rounded-xl">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
-              <div className="text-[13.5px] font-semibold">Limited Partners <span className="text-[#9b9890] font-normal text-[12px]">({lps.length})</span></div>
-              <div className="flex gap-2">
-                <button onClick={() => {
-                  const headers = ['Investor Name*','Investing As','Commitment Amount*','Currency*','Called Capital','Distributions','Commitment Date','Email','Phone','Address Line 1','Address Line 2','City','State','ZIP Code','Country','Contact Name','Notes'];
-                  const rows = lps.map(lp => [lp.name,'',lp.commitment,'USD',lp.called,lp.distributions,lp.join_date||'',lp.email||'',lp.phone||'',lp.address_line1||'',lp.address_line2||'',lp.city||'',lp.state||'',lp.zip||'',lp.country||'','',lp.notes||'']);
-                  const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(','))].join('\n');
-                  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = 'limited_partners.csv'; a.click();
-                }} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↓ Export</button>
-                <button onClick={() => setImportModal('lps')} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↑ Import</button>
-                <Link href={`/funds/${id}/lps/new`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">+ Add Limited Partner</Link>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead><tr>
-                  {['Investor','Type','Commitment','Called','Distributions','% of Fund','Status'].map(h => (
-                    <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {lps.length === 0 ? (
-                    <tr><td colSpan={7} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">
-                      No LPs yet. Click "Add Limited Partner" to add your first investor.
-                    </td></tr>
-                  ) : lps.map(lp => (
-                    <tr key={lp.id} className="hover:bg-[#f9f8f5] transition-colors cursor-pointer" onClick={() => window.location.href = `/funds/${id}/lps/${lp.id}`}>
-                      <td className="px-4 py-2.5 border-b border-[#e8e6df]">
-                        <div className="font-medium text-[12.5px] text-[#2d5be3] hover:underline">{lp.name}</div>
-                        <div className="text-[11px] text-[#9b9890]">{lp.email}</div>
-                      </td>
-                      <td className="px-4 py-2.5 border-b border-[#e8e6df]"><span className="px-1.5 py-0.5 rounded text-[10px] bg-[#eef2fd] text-[#2d5be3] font-medium">{lp.type}</span></td>
-                      <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtFull(lp.commitment)}</td>
-                      <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtFull(lp.called)}</td>
-                      <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{lp.distributions > 0 ? fmtFull(lp.distributions) : '—'}</td>
-                      <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px]">{fmtPct(lp.ownership_pct)}</td>
-                      <td className="px-4 py-2.5 border-b border-[#e8e6df]">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${lp.status === 'Active' ? 'bg-green-50 text-green-700' : lp.status === 'Pending' ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>{lp.status}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {/* LP summary totals */}
-            {lps.length > 0 && (
-              <div className="px-5 py-3 border-t border-[#e8e6df] bg-[#f9f8f5] grid grid-cols-4 gap-4 text-[12px]">
-                <div><span className="text-[#6b6860]">Total Commitment: </span><span className="font-mono font-semibold">{fmtFull(lps.reduce((s,lp)=>s+lp.commitment,0))}</span></div>
-                <div><span className="text-[#6b6860]">Total Called: </span><span className="font-mono font-semibold">{fmtFull(lps.reduce((s,lp)=>s+lp.called,0))}</span></div>
-                <div><span className="text-[#6b6860]">Total Distributions: </span><span className="font-mono font-semibold">{fmtFull(lps.reduce((s,lp)=>s+lp.distributions,0))}</span></div>
-                <div><span className="text-[#6b6860]">LP Count: </span><span className="font-semibold">{lps.length}</span></div>
+      {tab === 'lps' && (() => {
+        // Filter + sort
+        const filtered = lps
+          .filter(lp =>
+            lp.name.toLowerCase().includes(lpSearch.toLowerCase()) ||
+            (lp.email || '').toLowerCase().includes(lpSearch.toLowerCase()) ||
+            (lp.gp_contact || '').toLowerCase().includes(lpSearch.toLowerCase())
+          )
+          .sort((a, b) => {
+            if (lpSort === 'name-az')         return a.name.localeCompare(b.name);
+            if (lpSort === 'name-za')         return b.name.localeCompare(a.name);
+            if (lpSort === 'commitment-desc') return b.commitment - a.commitment;
+            if (lpSort === 'commitment-asc')  return a.commitment - b.commitment;
+            if (lpSort === 'called-desc')     return b.called - a.called;
+            return 0;
+          });
+
+        return (
+          <div>
+            {lps.length === 0 && (
+              <div className="bg-[#eef2fd] border border-[#c7d7f9] rounded-xl p-5 mb-5">
+                <div className="font-semibold text-[#2d5be3] mb-2">Getting Started</div>
+                <div className="space-y-2 text-[12.5px]">
+                  <div className="flex gap-2"><span className="w-5 h-5 rounded-full bg-[#2d5be3] text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">1</span><div><strong>Add your Limited Partners</strong> — LP is an investor in your fund with their commitment and capital call details.</div></div>
+                  <div className="flex gap-2"><span className="w-5 h-5 rounded-full bg-[#2d5be3] text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">2</span><div><strong>Record capital calls</strong> — Track each installment payment from LPs as they wire funds to the fund.</div></div>
+                </div>
               </div>
             )}
+            <div className="bg-white border border-[#e8e6df] rounded-xl">
+              {/* Header row */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
+                <div className="text-[13.5px] font-semibold">
+                  Limited Partners
+                  <span className="text-[#9b9890] font-normal text-[12px] ml-2">
+                    {filtered.length}{filtered.length !== lps.length ? ` of ${lps.length}` : ''}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => {
+                    const headers = ['Investor Name*','Investing As','Commitment Amount*','Currency*','Called Capital','Distributions','Commitment Date','Email','Phone','GP Contact','Address Line 1','Address Line 2','City','State','ZIP Code','Country','Notes'];
+                    const rows = lps.map(lp => [lp.name,'',lp.commitment,'USD',lp.called,lp.distributions,lp.join_date||'',lp.email||'',lp.phone||'',lp.gp_contact||'',lp.address_line1||'',lp.address_line2||'',lp.city||'',lp.state||'',lp.zip||'',lp.country||'',lp.notes||'']);
+                    const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(','))].join('\n');
+                    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = 'limited_partners.csv'; a.click();
+                  }} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↓ Export</button>
+                  <button onClick={() => setImportModal('lps')} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↑ Import</button>
+                  <Link href={`/funds/${id}/lps/new`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">+ Add Limited Partner</Link>
+                </div>
+              </div>
+
+              {/* Search + Sort toolbar */}
+              <div className="flex items-center gap-3 px-5 py-3 border-b border-[#e8e6df] bg-[#fafaf8]">
+                <div className="relative flex-1 max-w-xs">
+                  <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9b9890]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                  </svg>
+                  <input
+                    type="text"
+                    value={lpSearch}
+                    onChange={e => setLpSearch(e.target.value)}
+                    placeholder="Search by name, email, GP…"
+                    className="w-full pl-8 pr-3 py-1.5 rounded-[7px] border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3] bg-white"
+                  />
+                  {lpSearch && (
+                    <button onClick={() => setLpSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#9b9890] hover:text-[#1a1917] text-[14px]">×</button>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11.5px] text-[#9b9890]">Sort:</span>
+                  <select
+                    value={lpSort}
+                    onChange={e => setLpSort(e.target.value as any)}
+                    className="px-2 py-1.5 rounded-[7px] border border-[#e8e6df] text-[12px] outline-none focus:border-[#2d5be3] bg-white"
+                  >
+                    <option value="name-az">Name (A–Z)</option>
+                    <option value="name-za">Name (Z–A)</option>
+                    <option value="commitment-desc">Commitment (High–Low)</option>
+                    <option value="commitment-asc">Commitment (Low–High)</option>
+                    <option value="called-desc">Called (High–Low)</option>
+                  </select>
+                </div>
+                {lpSearch && (
+                  <span className="text-[11.5px] text-[#9b9890]">{filtered.length} result{filtered.length !== 1 ? 's' : ''}</span>
+                )}
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead><tr>
+                    {[
+                      { key: 'name',       label: 'Investor' },
+                      { key: 'type',       label: 'Type' },
+                      { key: 'commitment', label: 'Commitment' },
+                      { key: 'called',     label: 'Called' },
+                      { key: 'distrib',    label: 'Distributions' },
+                      { key: 'pct',        label: '% of Fund' },
+                      { key: 'gp',         label: 'GP Contact' },
+                    ].map(h => (
+                      <th key={h.key}
+                        onClick={() => {
+                          if (h.key === 'name')       setLpSort(s => s === 'name-az' ? 'name-za' : 'name-az');
+                          if (h.key === 'commitment') setLpSort(s => s === 'commitment-desc' ? 'commitment-asc' : 'commitment-desc');
+                          if (h.key === 'called')     setLpSort('called-desc');
+                        }}
+                        className={`text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap ${['name','commitment','called'].includes(h.key) ? 'cursor-pointer hover:text-[#1a1917] select-none' : ''}`}
+                      >
+                        {h.label}
+                        {h.key === 'name'       && <span className="ml-1 text-[10px]">{lpSort === 'name-az' ? '↑' : lpSort === 'name-za' ? '↓' : ''}</span>}
+                        {h.key === 'commitment' && <span className="ml-1 text-[10px]">{lpSort === 'commitment-desc' ? '↓' : lpSort === 'commitment-asc' ? '↑' : ''}</span>}
+                        {h.key === 'called'     && <span className="ml-1 text-[10px]">{lpSort === 'called-desc' ? '↓' : ''}</span>}
+                      </th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {filtered.length === 0 ? (
+                      <tr><td colSpan={7} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">
+                        {lps.length === 0 ? 'No LPs yet. Click "Add Limited Partner" to add your first investor.' : `No results for "${lpSearch}"`}
+                      </td></tr>
+                    ) : filtered.map(lp => (
+                      <tr key={lp.id} className="hover:bg-[#f9f8f5] transition-colors cursor-pointer" onClick={() => window.location.href = `/funds/${id}/lps/${lp.id}`}>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+                          <div className="font-medium text-[12.5px] text-[#2d5be3] hover:underline">{lp.name}</div>
+                          <div className="text-[11px] text-[#9b9890]">{lp.email}</div>
+                        </td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#eef2fd] text-[#2d5be3] font-medium">{lp.type}</span>
+                        </td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtFull(lp.commitment)}</td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtFull(lp.called)}</td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{lp.distributions > 0 ? fmtFull(lp.distributions) : '—'}</td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px]">{fmtPct(lp.ownership_pct)}</td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">
+                          {lp.gp_contact
+                            ? <span className="inline-flex items-center gap-1"><span className="w-4 h-4 rounded-full flex items-center justify-center text-white text-[7px] font-bold flex-shrink-0" style={{ background: coColor(lp.gp_contact) }}>{lp.gp_contact.slice(0,1)}</span>{lp.gp_contact}</span>
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {/* LP summary totals */}
+              {lps.length > 0 && (
+                <div className="px-5 py-3 border-t border-[#e8e6df] bg-[#f9f8f5] grid grid-cols-4 gap-4 text-[12px]">
+                  <div><span className="text-[#6b6860]">Total Commitment: </span><span className="font-mono font-semibold">{fmtFull(lps.reduce((s,lp)=>s+lp.commitment,0))}</span></div>
+                  <div><span className="text-[#6b6860]">Total Called: </span><span className="font-mono font-semibold">{fmtFull(lps.reduce((s,lp)=>s+lp.called,0))}</span></div>
+                  <div><span className="text-[#6b6860]">Total Distributions: </span><span className="font-mono font-semibold">{fmtFull(lps.reduce((s,lp)=>s+lp.distributions,0))}</span></div>
+                  <div><span className="text-[#6b6860]">LP Count: </span><span className="font-semibold">{lps.length}</span></div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ══ INVESTED CAPITAL ══ */}
       {tab === 'invested' && (

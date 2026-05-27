@@ -26,7 +26,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
     name: '', email: '', phone: '', type: 'Individual',
     commitment: '', joinDate: '',
     addressLine1: '', addressLine2: '', city: '',
-    state: '', zip: '', country: 'USA', notes: '',
+    state: '', zip: '', country: 'USA', notes: '', gp_contact: '',
   });
 
   // New capital call form
@@ -58,6 +58,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
           zip:          lpData.zip ?? '',
           country:      lpData.country ?? 'USA',
           notes:        lpData.notes ?? '',
+          gp_contact:   lpData.gp_contact ?? '',
         });
       }
       setTxns(txnsData);
@@ -85,7 +86,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
       'Investor Name*','Investing As','Commitment Amount*','Currency*',
       'Called Capital','Distributions','Commitment Date','Email','Phone',
       'Address Line 1','Address Line 2','City','State','ZIP Code','Country',
-      'Contact Name','Notes'
+      'GP Contact','Notes'
     ];
     const row = [
       lp.name, '',
@@ -95,7 +96,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
       lp.email || '', lp.phone || '',
       lp.address_line1 || '', lp.address_line2 || '',
       lp.city || '', lp.state || '', lp.zip || '', lp.country || '',
-      '', lp.notes || ''
+      lp.gp_contact || '', lp.notes || ''
     ];
     const csv = [headers.join(','), row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -134,6 +135,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
         zip:           form.zip || undefined,
         country:       form.country || undefined,
         notes:         form.notes || undefined,
+        gp_contact:    form.gp_contact || undefined,
       });
       setLP(updated);
       setEditing(false);
@@ -210,9 +212,9 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
       <div className="flex items-start justify-between mb-5">
         <div>
           <div className="flex items-center gap-2 text-[12.5px] text-[#6b6860] mb-2">
-            <Link href={`/funds/${fundId}`} className="hover:text-[#2d5be3]">← Fund</Link>
+            <Link href={`/funds/${fundId}?tab=lps`} className="hover:text-[#2d5be3]">← Limited Partners</Link>
             <span>/</span>
-            <span>Limited Partners</span>
+            <Link href={`/funds/${fundId}?tab=lps`} className="hover:text-[#2d5be3]">Limited Partners</Link>
             <span>/</span>
             <span className="text-[#1a1917] font-medium">{lp.name}</span>
           </div>
@@ -425,6 +427,10 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Notes</label>
                 <textarea value={form.notes} onChange={set('notes')} rows={2} className={inputCls + ' resize-y'} />
               </div>
+              <div>
+                <label className="block text-[12px] font-medium text-[#9b9890] mb-1">GP Contact</label>
+                <input value={form.gp_contact} onChange={set('gp_contact')} placeholder="e.g. Mohan Verma" className={inputCls} />
+              </div>
             </>
           ) : (
             <>
@@ -436,6 +442,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
                 { label: 'Commitment',   value: fmtFull(lp.commitment) },
                 { label: 'Join Date',    value: lp.join_date || '—' },
                 { label: 'Address',      value: [lp.address_line1, lp.address_line2, lp.city, lp.state, lp.zip, lp.country].filter(Boolean).join(', ') || '—' },
+                { label: 'GP Contact',   value: lp.gp_contact || '—' },
                 { label: 'Notes',        value: lp.notes || '—' },
               ].map(row => (
                 <div key={row.label} className="border-b border-[#f0f0ed] pb-3">
