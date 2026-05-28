@@ -1,209 +1,445 @@
-import { FUND, COMPANIES, fmt, fmtFull, moicColor, irrColor, coColor, coInitials } from '@/lib/data';
+'use client';
+
+import React, { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
+import {
+  getFunds, getCompaniesByFund, getTransactionsByFund,
+  getValuationsByFund, getLPsByFund,
+  DbFund, DbCompany, DbTransaction, DbValuation, DbLP,
+} from '@/lib/db';
+
+// ── Formatters ────────────────────────────────────────────────
+const fmt  = (n: number) => n >= 1_000_000 ? `$${(n/1_000_000).toFixed(1)}m` : n >= 1_000 ? `$${(n/1_000).toFixed(0)}k` : `$${n.toLocaleString()}`;
+const fmtM = (n: number) => `$${(n/1_000_000).toFixed(1)}m`;
+const pct  = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+
+// ── Recharts (loaded dynamically to avoid SSR issues) ─────────
+import {
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, Legend, ResponsiveContainer, Cell,
+} from 'recharts';
+
+const QUARTERS = [
+  'Q1 2024','Q2 2024','Q3 2024','Q4 2024',
+  'Q1 2025','Q2 2025','Q3 2025','Q4 2025',
+  'Q1 2026','Q2 2026','Q3 2026','Q4 2026',
+];
+
+function quarterToDate(q: string): Date {
+  const [qn, yr] = q.split(' ');
+  const month = qn === 'Q1' ? 2 : qn === 'Q2' ? 5 : qn === 'Q3' ? 8 : 11;
+  return new Date(Number(yr), month, 30);
+}
+
+function dateToQuarter(d: Date): string {
+  const m = d.getMonth();
+  const y = d.getFullYear();
+  const q = m < 3 ? 'Q1' : m < 6 ? 'Q2' : m < 9 ? 'Q3' : 'Q4';
+  return `${q} ${y}`;
+}
 
 export default function DashboardPage() {
-  const topCompanies = [...COMPANIES]
-    .sort((a, b) => b.moic - a.moic)
-    .slice(0, 8);
+  const [funds, setFunds]           = useState<DbFund[]>([]);
+  const [selectedFundId, setSelectedFundId] = useState<string>('all');
+  const [companies, setCompanies]   = useState<DbCompany[]>([]);
+  const [txns, setTxns]             = useState<DbTransaction[]>([]);
+  const [valuations, setValuations] = useState<DbValuation[]>([]);
+  const [lps, setLps]               = useState<DbLP[]>([]);
+  const [loading, setLoading]       = useState(true);
+
+  // Load funds list on mount
+  useEffect(() => {
+    getFunds().then(setFunds).catch(console.error);
+  }, []);
+
+  // Load data when fund selection changes
+  useEffect(() => {
+    setLoading(true);
+    async function load() {
+      try {
+        const fundIds = selectedFundId === 'all'
+          ? funds.map(f => f.id)
+          : [selectedFundId];
+        if (fundIds.length === 0) { setLoading(false); return; }
+
+        const [allCos, allTxns, allVals, allLPs] = await Promise.all([
+          Promise.all(fundIds.map(id => getCompaniesByFund(id))).then(r => r.flat()),
+          Promise.all(fundIds.map(id => getTransactionsByFund(id))).then(r => r.flat()),
+          Promise.all(fundIds.map(id => getValuationsByFund(id))).then(r => r.flat()),
+          Promise.all(fundIds.map(id => getLPsByFund(id))).then(r => r.flat()),
+        ]);
+        setCompanies(allCos);
+        setTxns(allTxns);
+        setValuations(allVals);
+        setLps(allLPs);
+      } finally {
+        setLoading(false);
+      }
+    }
+    if (funds.length > 0) load();
+  }, [selectedFundId, funds]);
+
+  // ── Derived KPIs ────────────────────────────────────────────
+  const kpis = useMemo(() => {
+    const invested      = txns.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
+    const distributions = txns.filter(t => t.type === 'Distribution').reduce((s, t) => s + t.amount, 0);
+
+    // Committed + called from live LP data (source of truth)
+    const committed = lps.reduce((s, lp) => s + lp.commitment, 0);
+    const called    = lps.reduce((s, lp) => s + lp.called, 0);
+    const uncalled  = Math.max(0, committed - called);
+
+    // Portfolio value: latest valuation per company by quarter_end, then created_at
+    const latestByCompany = valuations.reduce<Record<string, DbValuation>>((acc, v) => {
+      if (!v.company_id) return acc;
+      const existing = acc[v.company_id];
+      if (!existing) { acc[v.company_id] = v; return acc; }
+      // Compare quarter_end dates; use created_at as tiebreaker
+      const vDate  = v.quarter_end   || v.created_at || '';
+      const exDate = existing.quarter_end || existing.created_at || '';
+      if (vDate > exDate) acc[v.company_id] = v;
+      return acc;
+    }, {});
+    const portfolioValue = companies.reduce((s, co) => {
+      const latest = latestByCompany[co.id];
+      return s + (latest ? latest.value : co.unrealised || 0);
+    }, 0);
+
+    const totalValue = portfolioValue + distributions;
+    const moic = invested > 0 ? totalValue / invested : 0;
+    const dpi  = invested > 0 ? distributions / invested : 0;
+
+    // IRR (CAGR from earliest investment to today)
+    const sortedInv = txns.filter(t => t.type === 'Investment').sort((a, b) => a.date.localeCompare(b.date));
+    const firstDate = sortedInv[0]?.date ? new Date(sortedInv[0].date) : null;
+    const years = firstDate ? (Date.now() - firstDate.getTime()) / (1000*60*60*24*365.25) : 0;
+    const irr = years > 0.1 && totalValue > 0 && invested > 0
+      ? ((totalValue / invested) ** (1/years) - 1) * 100 : 0;
+
+    // % change vs previous quarter
+    const prevQ = QUARTERS[QUARTERS.indexOf(dateToQuarter(new Date())) - 1];
+    const prevPortfolioVal = companies.reduce((s, co) => {
+      const prevVal = valuations
+        .filter(v => v.company_id === co.id && v.quarter === prevQ)
+        .sort((a, b) => b.quarter_end.localeCompare(a.quarter_end))[0];
+      return s + (prevVal ? prevVal.value : 0);
+    }, 0);
+    const portfolioChange = prevPortfolioVal > 0
+      ? ((portfolioValue - prevPortfolioVal) / prevPortfolioVal) * 100 : 0;
+
+    return { invested, portfolioValue, totalValue, moic, dpi, irr, distributions, committed, uncalled, portfolioChange };
+  }, [txns, valuations, companies, lps, funds, selectedFundId]);
+
+  // ── Fund Performance Chart Data ──────────────────────────────
+  const perfChartData = useMemo(() => {
+    // Build cumulative invested + portfolio value per quarter
+    const data: { quarter: string; fundValue: number; invested: number }[] = [];
+    let cumInvested = 0;
+
+    for (const q of QUARTERS) {
+      const qDate = quarterToDate(q);
+      // Investments up to this quarter
+      const qInvested = txns
+        .filter(t => t.type === 'Investment' && new Date(t.date) <= qDate)
+        .reduce((s, t) => s + t.amount, 0);
+
+      // Portfolio value at this quarter (latest valuation <= this quarter per company)
+      const coIds = [...new Set(txns.filter(t => t.company_id).map(t => t.company_id!))];
+      let qPortfolioVal = 0;
+      for (const coId of coIds) {
+        const coVals = valuations
+          .filter(v => v.company_id === coId && v.quarter_end <= qDate.toISOString().split('T')[0])
+          .sort((a, b) => b.quarter_end.localeCompare(a.quarter_end));
+        if (coVals[0]) {
+          qPortfolioVal += coVals[0].value;
+        } else {
+          // Fall back to invested amount for companies with no valuation yet
+          const coInvested = txns
+            .filter(t => t.company_id === coId && t.type === 'Investment' && new Date(t.date) <= qDate)
+            .reduce((s, t) => s + t.amount, 0);
+          qPortfolioVal += coInvested;
+        }
+      }
+
+      if (qInvested > 0 || qPortfolioVal > 0) {
+        data.push({
+          quarter: q,
+          fundValue: qPortfolioVal / 1_000_000,
+          invested:  qInvested / 1_000_000,
+        });
+      }
+    }
+    return data;
+  }, [txns, valuations]);
+
+  // ── NAV Bridge Data ──────────────────────────────────────────
+  const navBridgeData = useMemo(() => {
+    const currentQ  = dateToQuarter(new Date());
+    const currentQIdx = QUARTERS.indexOf(currentQ);
+    const prevQ = QUARTERS[currentQIdx - 1] || QUARTERS[currentQIdx];
+
+    const coIds = [...new Set(valuations.map(v => v.company_id))];
+
+    let beginNAV = 0, endNAV = 0;
+    for (const coId of coIds) {
+      const prevVal = valuations.filter(v => v.company_id === coId && v.quarter === prevQ)
+        .sort((a, b) => b.quarter_end.localeCompare(a.quarter_end))[0];
+      const currVal = valuations.filter(v => v.company_id === coId && v.quarter === currentQ)
+        .sort((a, b) => b.quarter_end.localeCompare(a.quarter_end))[0];
+      if (prevVal) beginNAV += prevVal.value;
+      if (currVal) endNAV += currVal.value;
+    }
+
+    const newInvestments = txns
+      .filter(t => t.type === 'Investment' && dateToQuarter(new Date(t.date)) === currentQ)
+      .reduce((s, t) => s + t.amount, 0);
+    const valuationUplift = endNAV - beginNAV - newInvestments;
+    const periodChange = endNAV - beginNAV;
+    const periodChangePct = beginNAV > 0 ? (periodChange / beginNAV) * 100 : 0;
+
+    return {
+      bars: [
+        { name: `Beginning NAV\n(${prevQ})`,   value: beginNAV / 1_000_000,      color: '#4f46e5' },
+        { name: 'New Investments',              value: newInvestments / 1_000_000, color: '#6b7280' },
+        { name: 'Valuation Uplift',             value: valuationUplift / 1_000_000, color: '#10b981' },
+        { name: `Ending NAV\n(${currentQ})`,   value: endNAV / 1_000_000,        color: '#4f46e5' },
+      ],
+      periodChange, periodChangePct, prevQ, currentQ,
+    };
+  }, [txns, valuations]);
+
+  // ── Portfolio Quick View ─────────────────────────────────────
+  const portfolioRows = useMemo(() => {
+    return companies.map(co => {
+      const coTxns  = txns.filter(t => t.company_id === co.id);
+      const invested = coTxns.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
+      const distrib  = coTxns.filter(t => t.type === 'Distribution').reduce((s, t) => s + t.amount, 0);
+      const latestVal = valuations
+        .filter(v => v.company_id === co.id)
+        .sort((a, b) => b.quarter_end.localeCompare(a.quarter_end))[0];
+      const currentVal = latestVal?.value ?? invested;
+      const moic = invested > 0 ? (currentVal + distrib) / invested : 0;
+      const dpi  = invested > 0 ? distrib / invested : 0;
+      const sortedInv = coTxns.filter(t => t.type === 'Investment').sort((a, b) => a.date.localeCompare(b.date));
+      const firstDate = sortedInv[0]?.date ? new Date(sortedInv[0].date) : null;
+      const years = firstDate ? (Date.now() - firstDate.getTime()) / (1000*60*60*24*365.25) : 0;
+      const irr = years > 0.1 && currentVal > 0 && invested > 0
+        ? ((( currentVal + distrib) / invested) ** (1/years) - 1) * 100 : 0;
+      return { co, invested, distrib, currentVal, moic, dpi, irr };
+    }).sort((a, b) => b.moic - a.moic);
+  }, [companies, txns, valuations, lps]);
+
+  const moicColor = (m: number) => m >= 3 ? '#16a34a' : m >= 1.5 ? '#2d5be3' : m >= 1 ? '#6b7280' : '#dc2626';
+
+  if (loading && funds.length === 0) return (
+    <div className="flex items-center justify-center h-64 text-[#9b9890] text-[13px]">Loading dashboard…</div>
+  );
 
   return (
-    <div>
-      {/* Page header */}
-      <div className="flex items-start justify-between mb-5">
+    <div className="max-w-7xl">
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-[20px] font-semibold tracking-tight">
-            Dashboard{' '}
-            <span className="text-[#2d5be3] font-normal text-base">— Hi Kishore!</span>
-          </h1>
-          <p className="text-[12.5px] text-[#6b6860] mt-0.5">
-            Overview of your fund performance and portfolio companies
-          </p>
+          <h1 className="text-[22px] font-semibold tracking-tight">Dashboard</h1>
+          <p className="text-[12.5px] text-[#6b6860] mt-0.5">Overview of your fund performance and portfolio companies</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Fund selector */}
+          <select
+            value={selectedFundId}
+            onChange={e => setSelectedFundId(e.target.value)}
+            className="px-3 py-2 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] outline-none focus:border-[#2d5be3] min-w-[180px]"
+          >
+            <option value="all">🏦 All Funds</option>
+            {funds.map(f => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </select>
+          {/* Today */}
+          <div className="px-3 py-2 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] text-[#6b6860]">
+            📅 {new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </div>
         </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* ── KPI Cards ── */}
       <div className="grid grid-cols-5 gap-3 mb-5">
         {[
-          { label: 'Invested Capital',  value: fmt(FUND.invested),      change: '↑ 5.4%',  up: true },
-          { label: 'Total Fund Value',  value: fmt(FUND.nav),           change: '↑ 8.2%',  up: true },
-          { label: 'IRR',               value: `${FUND.irr}%`,                   change: '↑ 3.1%',  up: true },
-          { label: 'MOIC',              value: `${FUND.moic}x`,                  change: '↑ 0.3x',  up: true },
-          { label: 'DPI',               value: `${FUND.dpi.toFixed(2)}x`,        change: 'No distributions', up: false },
-        ].map((kpi) => (
-          <div key={kpi.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
-            <label className="text-[11.5px] text-[#6b6860] block mb-1.5">{kpi.label}</label>
-            <div className="text-[20px] font-semibold tracking-tight font-mono mb-1.5">{kpi.value}</div>
-            <div className={`text-[11.5px] font-medium ${kpi.up ? 'text-[#16a34a]' : 'text-[#9b9890]'}`}>
-              {kpi.change}
-            </div>
+          { label: 'Invested Capital', value: fmt(kpis.invested), change: null, color: '' },
+          { label: 'Total Fund Value', value: fmt(kpis.totalValue), change: kpis.portfolioChange, color: '' },
+          { label: 'IRR',              value: `${kpis.irr.toFixed(1)}%`, change: null, color: kpis.irr > 20 ? 'text-green-600' : kpis.irr > 0 ? 'text-amber-600' : 'text-red-600' },
+          { label: 'MOIC',             value: `${kpis.moic.toFixed(2)}x`, change: null, color: kpis.moic >= 2 ? 'text-green-600' : kpis.moic >= 1 ? 'text-amber-600' : 'text-red-600' },
+          { label: 'DPI',              value: `${kpis.dpi.toFixed(2)}x`, change: null, color: '' },
+        ].map(k => (
+          <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
+            <div className="text-[11px] text-[#9b9890] mb-1.5">{k.label}</div>
+            <div className={`text-[20px] font-semibold font-mono ${k.color}`}>{k.value}</div>
+            {k.change != null && (
+              <div className={`text-[11.5px] mt-1 font-medium ${k.change >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                {k.change >= 0 ? '▲' : '▼'} {Math.abs(k.change).toFixed(1)}% vs last quarter
+              </div>
+            )}
           </div>
         ))}
       </div>
 
-      {/* Fund Summary + Chart row */}
-      <div className="grid grid-cols-[1fr_280px] gap-3.5 mb-5">
-        {/* Chart placeholder */}
-        <div className="bg-white border border-[#e8e6df] rounded-xl p-5">
-          <div className="flex items-start justify-between mb-3">
-            <div className="text-[13.5px] font-semibold">Fund Performance Over Time</div>
-            <div className="flex gap-0.5">
-              {['1Y', '3Y', '5Y', 'All'].map((tf) => (
-                <button
-                  key={tf}
-                  className={`px-2 py-0.5 rounded-[5px] text-[11.5px] font-medium border transition-colors ${
-                    tf === '3Y'
-                      ? 'bg-[#2d5be3] text-white border-[#2d5be3]'
-                      : 'border-[#e8e6df] text-[#6b6860] hover:bg-[#f9f8f5]'
-                  }`}
-                >
-                  {tf}
-                </button>
-              ))}
+      {/* ── Charts Row ── */}
+      <div className="grid grid-cols-3 gap-4 mb-5">
+        {/* Fund Performance Chart */}
+        <div className="col-span-2 bg-white border border-[#e8e6df] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="text-[13.5px] font-semibold">Fund Performance Over Time</div>
+              <div className="text-[11.5px] text-[#9b9890]">Portfolio value vs invested capital by quarter</div>
             </div>
           </div>
-          {/* Simple visual chart using CSS */}
-          <div className="h-[180px] flex items-end gap-1 px-2">
-            {[0, 0, 0.5, 1.5, 2.5, 3.5, 4.5, 5.2, 5.8, 6.2, 6.8, 9.0].map((v, i) => (
-              <div key={i} className="flex-1 flex flex-col justify-end gap-0.5">
-                <div
-                  className="rounded-sm bg-[#2d5be3] opacity-80 transition-all"
-                  style={{ height: `${(v / 9.0) * 100}%` }}
-                />
+          {perfChartData.length < 2 ? (
+            <div className="flex items-center justify-center h-48 text-[12.5px] text-[#9b9890]">
+              Not enough data yet. Add quarterly valuations to see performance over time.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={perfChartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0efeb" />
+                <XAxis dataKey="quarter" tick={{ fontSize: 10, fill: '#9b9890' }} tickLine={false} />
+                <YAxis tickFormatter={v => `$${v.toFixed(1)}m`} tick={{ fontSize: 10, fill: '#9b9890' }} tickLine={false} axisLine={false} />
+                <Tooltip formatter={(v: any) => [`$${Number(v).toFixed(2)}m`]} contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e8e6df' }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Line type="monotone" dataKey="fundValue" name="Fund Value ($M)" stroke="#2d5be3" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                <Line type="monotone" dataKey="invested" name="Invested Capital ($M)" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Fund Summary Panel */}
+        <div className="bg-white border border-[#e8e6df] rounded-xl p-5">
+          <div className="text-[13.5px] font-semibold mb-4">Fund Summary</div>
+          <div className="space-y-3">
+            {[
+              { label: 'Committed Capital',   value: fmt(kpis.committed) },
+              { label: 'Invested Capital',     value: fmt(kpis.invested) },
+              { label: 'Uncalled Capital',     value: fmt(kpis.uncalled) },
+              { label: 'Distributions',        value: fmt(kpis.distributions) },
+              { label: 'Portfolio Value (NAV)', value: fmt(kpis.portfolioValue) },
+            ].map(row => (
+              <div key={row.label} className="flex items-center justify-between text-[12.5px]">
+                <span className="text-[#6b6860]">{row.label}</span>
+                <span className="font-mono font-medium">{row.value}</span>
               </div>
             ))}
-          </div>
-          <div className="flex justify-between text-[10px] text-[#9b9890] mt-1.5 px-2">
-            <span>Jun 23</span><span>Dec 23</span><span>Jun 24</span><span>Dec 24</span><span>Jun 25</span><span>Dec 25</span><span>Jun 26</span>
-          </div>
-          <div className="flex gap-3.5 mt-2">
-            <span className="flex items-center gap-1 text-[11px] text-[#6b6860]">
-              <span className="inline-block w-4 h-0.5 bg-[#2d5be3] rounded" />Fund Value ($M)
-            </span>
-            <span className="flex items-center gap-1 text-[11px] text-[#6b6860]">
-              <span className="inline-block w-4 border-t-2 border-dashed border-[#16a34a]" />Invested ($M)
-            </span>
-          </div>
-        </div>
-
-        {/* Fund Summary */}
-        <div className="bg-white border border-[#e8e6df] rounded-xl p-5">
-          <div className="text-[13.5px] font-semibold mb-3">Fund Summary</div>
-          {[
-            { label: 'Committed Capital', value: fmtFull(FUND.committed) },
-            { label: 'Invested Capital',  value: fmtFull(FUND.invested) },
-            { label: 'Uncalled Capital',  value: fmtFull(FUND.committed - FUND.called) },
-            { label: 'Distributions',     value: '$0' },
-            { label: 'Portfolio Value (NAV)', value: fmtFull(FUND.nav) },
-          ].map((row) => (
-            <div key={row.label} className="flex justify-between items-center py-2 border-b border-[#e8e6df] text-[12.5px]">
-              <span>{row.label}</span>
-              <span className="font-mono text-[12px]">{row.value}</span>
+            <div className="pt-2 border-t border-[#e8e6df] flex items-center justify-between text-[13px]">
+              <span className="font-semibold">Total Value</span>
+              <span className="font-mono font-bold">{fmt(kpis.totalValue)}</span>
             </div>
-          ))}
-          <div className="flex justify-between items-center py-2 text-[12.5px] font-semibold">
-            <span>Total Value</span>
-            <span className="font-mono text-[12px]">{fmtFull(FUND.nav)}</span>
+            <div className="text-[10.5px] text-[#9b9890]">NAV + Distributions</div>
           </div>
-          <div className="text-[10px] text-[#9b9890] text-right mb-2.5">NAV + Distributions</div>
-          <div className="flex gap-3 pt-2.5 border-t border-[#e8e6df]">
-            <span className="text-[11.5px] text-[#6b6860]">IRR <strong className="text-[#16a34a]">{FUND.irr}%</strong></span>
-            <span className="text-[11.5px] text-[#6b6860]">MOIC <strong>{FUND.moic}x</strong></span>
-            <span className="text-[11.5px] text-[#6b6860]">DPI <strong className="text-[#9b9890]">0.00x</strong></span>
+          <div className="mt-4 pt-3 border-t border-[#e8e6df] flex gap-4 text-[12px]">
+            <div><span className="text-[#9b9890]">IRR </span><span className={`font-semibold ${kpis.irr > 0 ? 'text-green-600' : ''}`}>{kpis.irr.toFixed(1)}%</span></div>
+            <div><span className="text-[#9b9890]">MOIC </span><span className="font-semibold">{kpis.moic.toFixed(2)}x</span></div>
+            <div><span className="text-[#9b9890]">DPI </span><span className="font-semibold">{kpis.dpi.toFixed(2)}x</span></div>
           </div>
         </div>
       </div>
 
-      {/* NAV Bridge */}
+      {/* ── NAV Bridge ── */}
       <div className="bg-white border border-[#e8e6df] rounded-xl p-5 mb-5">
-        <div className="text-[13.5px] font-semibold mb-1">
-          NAV Bridge Analysis{' '}
-          <span className="font-normal text-[#6b6860] text-xs">Quarter-over-Quarter</span>
-        </div>
-        <div className="text-[11.5px] text-[#6b6860] mb-4">Q1 2026: $6M → Q2 2026: $9M</div>
-        <div className="flex items-end gap-4 h-[100px]">
-          {[
-            { label: 'Beginning NAV\n(Q1 2026)', value: 6000000, color: '#6366f1' },
-            { label: 'New\nInvestments',          value: 50000,   color: '#d1d5db' },
-            { label: 'Valuation\nUplifts',        value: 3417269, color: '#22c55e' },
-            { label: 'Ending NAV\n(Q2 2026)',     value: 9467269, color: '#6366f1' },
-          ].map((bar) => (
-            <div key={bar.label} className="flex flex-col items-center flex-1 gap-1">
-              <div className="text-[11px] font-mono font-medium">${(bar.value / 1e6).toFixed(1)}M</div>
-              <div
-                className="w-full rounded-md"
-                style={{ height: `${(bar.value / 9467269) * 80}px`, background: bar.color }}
-              />
-              <div className="text-[10px] text-[#9b9890] text-center whitespace-pre-line leading-tight">{bar.label}</div>
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <div className="text-[13.5px] font-semibold">NAV Bridge Analysis <span className="text-[12px] font-normal text-[#9b9890] ml-1">Quarter-over-Quarter Performance</span></div>
+            <div className="text-[11.5px] text-[#9b9890] mt-0.5">
+              {navBridgeData.prevQ}: {fmtM(navBridgeData.bars[0].value * 1_000_000)} → {navBridgeData.currentQ}: {fmtM(navBridgeData.bars[3].value * 1_000_000)}
             </div>
-          ))}
-        </div>
-        <div className="flex gap-7 mt-4">
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-[#9b9890]">Period Change</div>
-            <div className="text-base font-semibold font-mono text-[#16a34a]">+$3,467,269</div>
           </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-[#9b9890]">% Change</div>
-            <div className="text-base font-semibold font-mono text-[#16a34a]">+62.9%</div>
+          <div className="flex gap-6 text-[12.5px]">
+            <div>
+              <div className="text-[11px] text-[#9b9890]">Period Change</div>
+              <div className={`font-semibold font-mono ${navBridgeData.periodChange >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                {navBridgeData.periodChange >= 0 ? '+' : ''}{fmtM(navBridgeData.periodChange)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-[#9b9890]">% Change</div>
+              <div className={`font-semibold ${navBridgeData.periodChangePct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                {pct(navBridgeData.periodChangePct)}
+              </div>
+            </div>
           </div>
         </div>
+        {navBridgeData.bars[0].value === 0 && navBridgeData.bars[3].value === 0 ? (
+          <div className="flex items-center justify-center h-36 text-[12.5px] text-[#9b9890]">
+            No valuation data for current and previous quarters yet.
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={navBridgeData.bars} margin={{ top: 5, right: 20, left: 0, bottom: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0efeb" vertical={false} />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#6b6860' }} tickLine={false} />
+              <YAxis tickFormatter={v => `$${v.toFixed(0)}m`} tick={{ fontSize: 10, fill: '#9b9890' }} tickLine={false} axisLine={false} />
+              <Tooltip formatter={(v: any) => [`$${Number(v).toFixed(2)}m`]} contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e8e6df' }} />
+              <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                {navBridgeData.bars.map((entry, i) => (
+                  <Cell key={i} fill={entry.color} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
       </div>
 
-      {/* Portfolio Quick View */}
-      <div className="bg-white border border-[#e8e6df] rounded-xl p-5">
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-[13.5px] font-semibold">Portfolio — Quick View</div>
-          <a
-            href="/portfolio"
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors"
-          >
-            View All
-          </a>
+      {/* ── Portfolio Quick View ── */}
+      <div className="bg-white border border-[#e8e6df] rounded-xl">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
+          <div className="text-[13.5px] font-semibold">Portfolio Quick View</div>
+          <Link href="/funds" className="text-[12.5px] text-[#2d5be3] hover:underline">View All →</Link>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
               <tr>
-                {['Company', 'Invested', 'Unrealised', 'Total Value', 'MOIC', 'IRR', 'Status'].map((h) => (
-                  <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-3 py-2.5 border-b-2 border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">
-                    {h}
-                  </th>
+                {['Company','Invested','Distributed','Current Value','MOIC','DPI','IRR','Status'].map(h => (
+                  <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {topCompanies.map((co) => (
+              {portfolioRows.length === 0 ? (
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">
+                  No portfolio companies yet.
+                </td></tr>
+              ) : portfolioRows.map(({ co, invested, distrib, currentVal, moic, dpi, irr }) => (
                 <tr key={co.id} className="hover:bg-[#f9f8f5] transition-colors">
-                  <td className="px-3 py-2.5 border-b border-[#e8e6df]">
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df]">
                     <div className="flex items-center gap-2">
-                      <div
-                        className="w-7 h-7 rounded-[7px] flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
-                        style={{ background: coColor(co.name) }}
-                      >
-                        {coInitials(co.name)}
+                      <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                        style={{ background: `hsl(${co.name.charCodeAt(0) * 7 % 360}, 60%, 45%)` }}>
+                        {co.name.slice(0, 1).toUpperCase()}
                       </div>
                       <div>
                         <div className="font-medium text-[12.5px]">{co.name}</div>
-                        <div className="text-[10px] text-[#9b9890]">{co.sector}</div>
+                        <div className="text-[11px] text-[#9b9890]">{co.sector || 'Unspecified'}</div>
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmt(co.invested)}</td>
-                  <td className="px-3 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmt(co.unrealised)}</td>
-                  <td className="px-3 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmt(co.unrealised)}</td>
-                  <td className={`px-3 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${moicColor(co.moic)}`}>
-                    {co.moic > 0 ? `${co.moic.toFixed(2)}x` : '—'}
-                  </td>
-                  <td className={`px-3 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${irrColor(co.irr)}`}>
-                    {co.irr > 0 ? '+' : ''}{co.irr.toFixed(1)}%
-                  </td>
-                  <td className="px-3 py-2.5 border-b border-[#e8e6df]">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                      co.status === 'Active'
-                        ? 'bg-[#f0fdf4] text-[#16a34a]'
-                        : 'bg-[#fef2f2] text-[#dc2626]'
-                    }`}>
-                      {co.status}
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmt(invested)}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmt(distrib)}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] font-medium">{fmt(currentVal)}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold text-white"
+                      style={{ background: moicColor(moic) }}>
+                      {moic.toFixed(2)}x
                     </span>
+                  </td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{dpi.toFixed(2)}x</td>
+                  <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12px] font-medium ${irr > 0 ? 'text-green-600' : irr < 0 ? 'text-red-500' : 'text-[#9b9890]'}`}>
+                    {irr !== 0 ? `${irr >= 0 ? '+' : ''}${irr.toFixed(1)}%` : '—'}
+                  </td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                      co.status === 'Active' ? 'bg-green-50 text-green-700' :
+                      co.status === 'Exited' ? 'bg-blue-50 text-blue-700' :
+                      'bg-red-50 text-red-700'
+                    }`}>{co.status}</span>
                   </td>
                 </tr>
               ))}
