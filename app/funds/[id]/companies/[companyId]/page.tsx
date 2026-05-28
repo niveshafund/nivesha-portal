@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { supabase } from '@/lib/supabase';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import Link from 'next/link';
@@ -25,7 +26,10 @@ const QUARTER_END: Record<string,string> = {
   'Q1 2026':'2026-03-31','Q2 2026':'2026-06-30','Q3 2026':'2026-09-30','Q4 2026':'2026-12-31',
 };
 
-type Tab = 'overview' | 'transactions' | 'valuations' | 'updates';
+type Tab = 'overview' | 'transactions' | 'valuations' | 'updates' | 'dataroom';
+
+type DocType = 'NDA' | 'Term Sheet' | 'SAFE' | 'Financial' | 'Pitch Deck' | 'Legal' | 'Other';
+type CompanyDoc = { id: string; name: string; file_path: string; file_size: number; file_type: string; doc_type: DocType; notes: string; uploaded_by: string; created_at: string; };
 
 function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyId: string }> }) {
   const { id: fundId, companyId } = React.use(params);
@@ -68,6 +72,18 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   });
   const [savingVal, setSavingVal] = useState(false);
 
+  // Data Room
+  const [docs, setDocs]               = useState<CompanyDoc[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [docFilter, setDocFilter]     = useState<string>('All');
+  const [docSearch, setDocSearch]     = useState('');
+  const [showUploadForm, setShowUploadForm] = useState(false);
+  const [uploadForm, setUploadForm]   = useState<{ doc_type: DocType; notes: string }>({ doc_type: 'Other', notes: '' });
+  const [uploadFile, setUploadFile]   = useState<File | null>(null);
+  const [dragOver, setDragOver]       = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // New update form
   const [showUpdateForm, setShowUpdateForm] = useState(false);
   const [editingUpdate, setEditingUpdate] = useState<DbCompanyUpdate | null>(null);
@@ -76,6 +92,24 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   const [savingUpdate, setSavingUpdate] = useState(false);
 
   useEffect(() => { load(); }, [companyId]);
+
+  async function loadDocs() {
+    setDocsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('company_documents')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false });
+      if (!error && data) setDocs(data as CompanyDoc[]);
+    } finally {
+      setDocsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (tab === 'dataroom') loadDocs();
+  }, [tab]);
 
   async function load() {
     try {
@@ -108,6 +142,97 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       setLoading(false);
     }
   }
+
+  const detectDocType = (filename: string): DocType => {
+    const lower = filename.toLowerCase();
+    if (lower.includes('nda') || lower.includes('non-disclosure')) return 'NDA';
+    if (lower.includes('term') && lower.includes('sheet')) return 'Term Sheet';
+    if (lower.includes('safe')) return 'SAFE';
+    if (lower.includes('financial') || lower.includes('financials') || lower.includes('p&l') || lower.includes('balance')) return 'Financial';
+    if (lower.includes('pitch') || lower.includes('deck')) return 'Pitch Deck';
+    if (lower.includes('agreement') || lower.includes('contract') || lower.includes('legal')) return 'Legal';
+    return 'Other';
+  };
+
+  const handleUploadDoc = async () => {
+    if (!uploadFile) return;
+    setUploadingDoc(true);
+    try {
+      const docName = uploadFile.name.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
+      const autoDocType = detectDocType(uploadFile.name);
+      const ext = uploadFile.name.split('.').pop();
+      const path = `${companyId}/${Date.now()}-${docName.replace(/\s+/g,'-')}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('company-documents')
+        .upload(path, uploadFile, { upsert: false });
+      if (upErr) throw upErr;
+
+      const { error: dbErr } = await supabase.from('company_documents').insert({
+        company_id:  companyId,
+        fund_id:     fundId,
+        name:        docName,
+        file_path:   path,
+        file_size:   uploadFile.size,
+        file_type:   uploadFile.type,
+        doc_type:    autoDocType,
+        notes:       uploadForm.notes || null,
+        uploaded_by: 'GP',
+      });
+      if (dbErr) throw dbErr;
+
+      setUploadForm({ doc_type: 'Other', notes: '' });
+      setUploadFile(null);
+      setShowUploadForm(false);
+      await loadDocs();
+    } catch (err: any) {
+      alert('Upload failed: ' + err.message);
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
+
+  const handleDeleteDoc = async (doc: CompanyDoc) => {
+    if (!confirm(`Delete "${doc.name}"?`)) return;
+    await supabase.storage.from('company-documents').remove([doc.file_path]);
+    await supabase.from('company_documents').delete().eq('id', doc.id);
+    await loadDocs();
+  };
+
+  const handleViewDoc = async (doc: CompanyDoc) => {
+    const { data } = await supabase.storage
+      .from('company-documents')
+      .createSignedUrl(doc.file_path, 3600);
+    if (!data?.signedUrl) return;
+    const isPdf = doc.file_path.toLowerCase().endsWith('.pdf') || doc.file_type === 'application/pdf';
+    const url = isPdf
+      ? data.signedUrl
+      : `https://docs.google.com/viewer?url=${encodeURIComponent(data.signedUrl)}&embedded=false`;
+    window.open(url, '_blank');
+  };
+
+  const handleDownloadDoc = async (doc: CompanyDoc) => {
+    const filename = doc.name + '.' + doc.file_path.split('.').pop();
+    const { data } = await supabase.storage
+      .from('company-documents')
+      .createSignedUrl(doc.file_path, 3600);
+    if (!data?.signedUrl) return;
+    // Fetch as blob so the browser downloads instead of navigating (fixes PDF cross-origin issue)
+    const blob = await fetch(data.signedUrl).then(r => r.blob());
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  };
+
+  const fmtFileSize = (bytes: number) => {
+    if (bytes > 1_000_000) return `${(bytes/1_000_000).toFixed(1)} MB`;
+    if (bytes > 1_000)     return `${(bytes/1_000).toFixed(0)} KB`;
+    return `${bytes} B`;
+  };
 
   const set = (k: string) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -403,6 +528,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
         { key: 'transactions', label: 'Transactions' },
         { key: 'valuations',   label: 'Valuations' },
         { key: 'updates',      label: 'Updates' },
+        { key: 'dataroom',     label: 'Data Room' },
       ];
 
   return (
@@ -1137,6 +1263,140 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ══ DATA ROOM ══ */}
+      {tab === 'dataroom' && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="text-[13.5px] font-semibold">Data Room</div>
+              <div className="text-[11.5px] text-[#9b9890] mt-0.5">Documents, agreements, and files for this company</div>
+            </div>
+            <button onClick={() => setShowUploadForm(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">
+              + Upload Document
+            </button>
+          </div>
+
+          {/* Filter + Search bar */}
+          <div className="flex gap-2 mb-4">
+            <div className="flex gap-1">
+              {(['All','NDA','Term Sheet','SAFE','Financial','Pitch Deck','Legal','Other'] as const).map(f => (
+                <button key={f} onClick={() => setDocFilter(f)}
+                  className={`px-2.5 py-1 rounded-[6px] text-[11.5px] font-medium transition-colors ${docFilter === f ? 'bg-[#2d5be3] text-white' : 'bg-white border border-[#e8e6df] text-[#6b6860] hover:bg-[#f9f8f5]'}`}>
+                  {f}
+                </button>
+              ))}
+            </div>
+            <input value={docSearch} onChange={e => setDocSearch(e.target.value)}
+              placeholder="Search documents…"
+              className="ml-auto px-3 py-1.5 rounded-[7px] border border-[#e8e6df] text-[12px] outline-none focus:border-[#2d5be3] w-52" />
+          </div>
+
+          {/* Upload form */}
+          {showUploadForm && (
+            <div className="bg-white border border-[#e8e6df] rounded-xl p-5 mb-4">
+              {/* Drag-and-drop / click-to-browse zone */}
+              <div
+                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) setUploadFile(f); }}
+                onClick={() => fileInputRef.current?.click()}
+                className={`relative flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed cursor-pointer transition-colors mb-3 py-8 px-6 ${dragOver ? 'border-[#2d5be3] bg-[#eef2fd]' : uploadFile ? 'border-green-400 bg-green-50' : 'border-[#d4d2cb] bg-[#fafaf8] hover:border-[#2d5be3] hover:bg-[#f5f7fe]'}`}>
+                <input ref={fileInputRef} type="file" className="hidden" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} />
+                {uploadFile ? (
+                  <>
+                    <div className="text-2xl">📄</div>
+                    <div className="text-[13px] font-semibold text-green-700">{uploadFile.name}</div>
+                    <div className="text-[11.5px] text-[#9b9890]">{fmtFileSize(uploadFile.size)} · click to change</div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-2xl">☁️</div>
+                    <div className="text-[13px] font-medium text-[#3d3b35]">Drag &amp; drop a file here, or <span className="text-[#2d5be3]">browse</span></div>
+                    <div className="text-[11.5px] text-[#9b9890]">PDF, DOCX, XLSX, PNG, JPG and more</div>
+                  </>
+                )}
+              </div>
+
+              {/* Optional note */}
+              <input value={uploadForm.notes} onChange={e => setUploadForm(f => ({...f, notes: e.target.value}))}
+                placeholder="Add a note (optional) — e.g. Signed NDA from April 2025"
+                className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3] mb-3" />
+
+              <div className="flex gap-2">
+                <button onClick={handleUploadDoc} disabled={uploadingDoc || !uploadFile}
+                  className="px-3 py-1.5 rounded-[7px] text-[12px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
+                  {uploadingDoc ? 'Uploading…' : 'Upload'}
+                </button>
+                <button onClick={() => { setShowUploadForm(false); setUploadFile(null); setDragOver(false); setUploadForm({ doc_type: 'Other', notes: '' }); }}
+                  className="px-3 py-1.5 rounded-[7px] text-[12px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {docsLoading ? (
+            <div className="flex items-center justify-center py-12 text-[#9b9890] text-[13px]">
+              <svg className="animate-spin w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              Loading documents…
+            </div>
+          ) : (() => {
+            const filtered = docs
+              .filter(d => docFilter === 'All' || d.doc_type === docFilter)
+              .filter(d => !docSearch || d.name.toLowerCase().includes(docSearch.toLowerCase()) || d.notes?.toLowerCase().includes(docSearch.toLowerCase()));
+            return filtered.length === 0 ? (
+              <div className="bg-white border border-[#e8e6df] rounded-xl p-10 text-center">
+                <div className="text-2xl mb-2">📁</div>
+                <div className="text-[13px] font-medium mb-1">{docs.length === 0 ? 'No documents yet' : 'No documents match your filter'}</div>
+                <p className="text-[12px] text-[#9b9890]">{docs.length === 0 ? 'Upload NDAs, term sheets, SAFEs, financials, and other company documents' : 'Try a different filter or search term'}</p>
+              </div>
+            ) : (
+              <div className="bg-white border border-[#e8e6df] rounded-xl overflow-hidden">
+                <table className="w-full border-collapse">
+                  <thead><tr>
+                    {['Name','Type','Size','Notes','Uploaded','Actions'].map(h => (
+                      <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5]">{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {filtered.map(doc => (
+                      <tr key={doc.id} className="hover:bg-[#f9f8f5] transition-colors">
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+                          <span className="text-[12.5px] font-medium text-[#1a1915]">{doc.name}</span>
+                        </td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df]">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#f9f8f5] border border-[#e8e6df] text-[#6b6860]">{doc.doc_type}</span>
+                        </td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#9b9890] font-mono">{fmtFileSize(doc.file_size)}</td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860] max-w-[200px] truncate">{doc.notes || '—'}</td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[11.5px] text-[#9b9890]">{new Date(doc.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] whitespace-nowrap">
+                          <div className="flex gap-2">
+                            <button onClick={() => handleViewDoc(doc)}
+                              className="text-[11.5px] text-[#2d5be3] hover:underline">View</button>
+                            <button onClick={() => handleDownloadDoc(doc)}
+                              className="text-[11.5px] text-[#6b6860] hover:text-[#3d3b35] hover:underline">Download</button>
+                            <button onClick={() => handleDeleteDoc(doc)}
+                              className="text-[11.5px] text-red-500 hover:text-red-700">Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="px-4 py-2 border-t border-[#e8e6df] bg-[#f9f8f5] text-[11.5px] text-[#9b9890]">
+                  {filtered.length} document{filtered.length !== 1 ? 's' : ''}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
