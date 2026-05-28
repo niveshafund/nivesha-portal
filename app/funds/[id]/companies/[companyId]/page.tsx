@@ -260,6 +260,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       const years      = investDate
         ? (valDate.getTime() - investDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25)
         : 0;
+      // IRR (CAGR) = (Current Value / Invested) ^ (1/years) - 1
       const newIrr = (years > 0.01 && newValuation > 0 && totalInvested > 0)
         ? ((newValuation / totalInvested) ** (1 / years) - 1) * 100
         : 0;
@@ -272,9 +273,8 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       const derivedQuarter = `Q${qNum} ${y}`;
       const derivedQuarterEnd = QUARTER_END[derivedQuarter] ?? valForm.date;
 
-      // Auto-calculate MOIC from entry valuation cap
-      const entryVal = investmentTxns[0]?.valuation_cap ?? null;
-      const newMoic  = entryVal && entryVal > 0 ? newValuation / entryVal : 0;
+      // MOIC = Current Investment Value / Total Amount Invested
+      const newMoic = totalInvested > 0 ? newValuation / totalInvested : 0;
       const coValue  = valForm.companyValue ? Number(valForm.companyValue) : newValuation;
 
       await upsertValuation({
@@ -395,10 +395,9 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
     .sort((a, b) => a.date.localeCompare(b.date));
   const entryValuation = investmentTxns[0]?.valuation_cap ?? null;
 
-  // MOIC = Current Value / Entry Valuation (correct VC definition)
-  // Falls back to stored company.moic only if we can't compute it live
-  const computedMoic = (entryValuation && entryValuation > 0 && currentValue > 0)
-    ? currentValue / entryValuation
+  // MOIC = Current Investment Value / Total Amount Invested
+  const computedMoic = (currentValue > 0 && totalInvested > 0)
+    ? currentValue / totalInvested
     : null;
   const displayMoic = computedMoic ?? (company.moic > 0 ? company.moic : null);
 
@@ -799,12 +798,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
               <div className="text-[13.5px] font-semibold">Quarterly Valuations</div>
               <div className="text-[11.5px] text-[#9b9890] mt-0.5">Update the company valuation as it raises new rounds</div>
             </div>
-            <button onClick={() => {
-              // Pre-populate with latest known investment value
-              const lastVal = valuations[0]?.value ?? currentValue ?? 0;
-              setValForm(f => ({...f, investmentValue: lastVal > 0 ? String(lastVal) : ''}));
-              setShowValForm(true);
-            }}
+            <button onClick={() => { setShowValForm(true); }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">
               + Add Valuation
             </button>
@@ -845,47 +839,20 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                   <div className="grid grid-cols-2 gap-4 mb-4">
                     <div>
                       <label className="block text-[11.5px] font-medium mb-1">Investment Value *</label>
-                      <div className="relative mb-2">
+                      <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
                         <input type="number" value={valForm.investmentValue}
                           onChange={e => setValForm(f => ({...f, investmentValue: e.target.value}))}
-                          placeholder="0" className={inputCls + ' pl-6'} />
-                      </div>
-                      {/* ±% quick adjust — only active when value > 0 */}
-                      <div className="flex gap-1.5 flex-wrap">
-                        {[-10,-5,5,10].map(pct => (
-                          <button key={pct} type="button"
-                            onClick={() => setValForm(f => {
-                              const cur = Number(f.investmentValue) || 0;
-                              if (!cur) return f;
-                              return {...f, investmentValue: String(Math.round(cur * (1 + pct/100)))};
-                            })}
-                            className={`px-2.5 py-1 rounded-[6px] text-[11px] font-medium border transition-colors ${
-                              Number(valForm.investmentValue) > 0
-                                ? 'border-[#e8e6df] bg-white hover:bg-[#f0f4ff] hover:border-[#2d5be3] hover:text-[#2d5be3] cursor-pointer'
-                                : 'border-[#e8e6df] bg-[#f9f8f5] text-[#c0bfbb] cursor-not-allowed'
-                            }`}>
-                            {pct > 0 ? '+' : ''}{pct}%
-                          </button>
-                        ))}
-                        <button type="button"
-                          onClick={() => {
-                            const lastVal = valuations[0]?.value ?? currentValue ?? 0;
-                            setValForm(f => ({...f, investmentValue: lastVal > 0 ? String(lastVal) : ''}));
-                          }}
-                          className="px-2.5 py-1 rounded-[6px] text-[11px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors text-[#9b9890]">
-                          Reset
-                        </button>
+                          placeholder="Enter current investment value" className={inputCls + ' pl-6'} />
                       </div>
                       <p className="text-[11px] text-[#9b9890] mt-1.5">Your stake's current worth. Drives MOIC.</p>
-                      {valForm.investmentValue && Number(valForm.investmentValue) > 0 && (() => {
-                        const entryVal = investmentTxns[0]?.valuation_cap ?? null;
-                        const moic = entryVal && entryVal > 0 ? (Number(valForm.investmentValue) / entryVal) : null;
-                        return moic != null ? (
+                      {valForm.investmentValue && Number(valForm.investmentValue) > 0 && totalInvested > 0 && (() => {
+                        const moic = Number(valForm.investmentValue) / totalInvested;
+                        return (
                           <p className="text-[11.5px] mt-1">
                             <span className={`font-semibold ${moic >= 1 ? 'text-green-600' : 'text-red-500'}`}>MOIC: {moic.toFixed(2)}x</span>
                           </p>
-                        ) : null;
+                        );
                       })()}
                     </div>
                     <div>
@@ -921,6 +888,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                             : 0;
                           const iv = Number(valForm.investmentValue);
                           if (!iv || !totalInvested || years < 0.01) return <span className="text-[#9b9890]">Enter value + date</span>;
+                          // IRR = (Current Investment Value / Total Invested) ^ (1/years) - 1
                           const irr = ((iv / totalInvested) ** (1 / years) - 1) * 100;
                           return <span className={irr >= 0 ? 'text-green-600 font-medium' : 'text-red-500 font-medium'}>{irr.toFixed(1)}%</span>;
                         })()}
@@ -1015,7 +983,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
 
           <table className="w-full border-collapse">
             <thead><tr>
-              {['Quarter','Company Value','MOIC','IRR','Round','Notes','Actions'].map(h => (
+              {['Quarter','Investment Value','Valuation Method','MOIC','IRR','Round','Actions'].map(h => (
                 <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5]">{h}</th>
               ))}
             </tr></thead>
@@ -1029,11 +997,13 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                   <td className="px-4 py-2.5 border-b border-[#e8e6df]">
                     <span className="px-1.5 py-0.5 rounded text-[11px] bg-[#f9f8f5] border border-[#e8e6df]">{v.quarter}</span>
                   </td>
-                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] font-medium">{fmtFull(v.value)}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] font-medium text-green-700">{fmtFull(v.value)}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">
+                    {v.notes?.match(/^\[(.+?)\]/)?.[1] || '—'}
+                  </td>
                   <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${moicColor(v.moic)}`}>{v.moic > 0 ? `${v.moic.toFixed(2)}x` : '—'}</td>
                   <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${irrColor(v.irr)}`}>{v.irr !== 0 ? `${v.irr.toFixed(1)}%` : '—'}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{v.round || '—'}</td>
-                  <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{v.notes || '—'}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] whitespace-nowrap">
                     <div className="flex gap-2">
                       <button onClick={() => setEditingVal({...v})}
@@ -1054,54 +1024,95 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditingVal(null)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6">
-            <h3 className="text-[16px] font-semibold mb-4">Edit Valuation — {editingVal.quarter}</h3>
+            <h3 className="text-[16px] font-semibold mb-1">Edit Valuation — {editingVal.quarter}</h3>
+            <p className="text-[12px] text-[#9b9890] mb-4">Update the investment value and details for this quarter.</p>
+
             <div className="grid grid-cols-2 gap-4 mb-4">
+              {/* Investment Value */}
               <div>
-                <label className="block text-[12px] font-medium mb-1">Quarter</label>
-                <select value={editingVal.quarter}
-                  onChange={e => setEditingVal(v => v ? {...v, quarter: e.target.value} : null)}
-                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
-                  {QUARTERS.map(q => <option key={q} value={q}>{q}</option>)}
+                <label className="block text-[12px] font-medium mb-1">Investment Value (USD) *</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
+                  <input type="number" value={editingVal.value}
+                    onChange={e => {
+                      const val = Number(e.target.value);
+                      // Recompute MOIC and IRR live
+                      const newMoic = totalInvested > 0 ? val / totalInvested : 0;
+                      const investDate = investmentTxns[0]?.date ? new Date(investmentTxns[0].date) : null;
+                      const qEnd = QUARTER_END[editingVal.quarter] ?? editingVal.quarter_end;
+                      const valDate = qEnd ? new Date(qEnd) : new Date();
+                      const years = investDate ? (valDate.getTime() - investDate.getTime()) / (1000*60*60*24*365.25) : 0;
+                      const newIrr = years > 0.01 && val > 0 && totalInvested > 0
+                        ? ((val / totalInvested) ** (1/years) - 1) * 100 : 0;
+                      setEditingVal(v => v ? {...v, value: val, moic: newMoic, irr: newIrr} : null);
+                    }}
+                    className="w-full pl-6 pr-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+                </div>
+                <p className="text-[11px] text-[#9b9890] mt-1">Your stake's current worth</p>
+              </div>
+
+              {/* Valuation Method */}
+              <div>
+                <label className="block text-[12px] font-medium mb-1">Valuation Method</label>
+                <select
+                  value={editingVal.notes?.match(/^\[(.+?)\]/)?.[1] || 'Manual Valuation'}
+                  onChange={e => setEditingVal(v => v ? {
+                    ...v,
+                    notes: `[${e.target.value}]${v.notes?.replace(/^\[.*?\]/, '') || ''}`
+                  } : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3] bg-white">
+                  {['Recent Funding Round','Manual Valuation','Metrics Based','Share Price','Discounted Cash Flow','Comparable Multiples'].map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
                 </select>
               </div>
+
+              {/* MOIC — read-only auto */}
               <div>
-                <label className="block text-[12px] font-medium mb-1">Company Value (USD)</label>
-                <input type="number" value={editingVal.value}
-                  onChange={e => setEditingVal(v => v ? {...v, value: Number(e.target.value)} : null)}
-                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium mb-1">MOIC</label>
-                <input type="number" step="0.01" value={editingVal.moic}
-                  onChange={e => setEditingVal(v => v ? {...v, moic: Number(e.target.value)} : null)}
-                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium mb-1">IRR (auto-calculated)</label>
-                <div className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] bg-[#f9f8f5] text-[13px] text-[#6b6860]">
-                  {editingVal.moic > 0 ? (
-                    <span className={editingVal.irr >= 0 ? 'text-green-600 font-medium' : 'text-red-500 font-medium'}>
-                      {editingVal.irr.toFixed(1)}%
-                    </span>
-                  ) : <span className="text-[#9b9890]">—</span>}
+                <label className="block text-[12px] font-medium mb-1">MOIC (auto-calculated)</label>
+                <div className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] bg-[#f9f8f5] text-[13px]">
+                  <span className={editingVal.moic > 0 ? moicColor(editingVal.moic) : 'text-[#9b9890]'}>
+                    {editingVal.moic > 0 ? `${editingVal.moic.toFixed(2)}x` : '—'}
+                  </span>
                 </div>
               </div>
+
+              {/* IRR — read-only auto */}
               <div>
-                <label className="block text-[12px] font-medium mb-1">Round</label>
+                <label className="block text-[12px] font-medium mb-1">IRR (auto-calculated)</label>
+                <div className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] bg-[#f9f8f5] text-[13px]">
+                  <span className={editingVal.irr > 0 ? 'text-green-600 font-medium' : editingVal.irr < 0 ? 'text-red-500 font-medium' : 'text-[#9b9890]'}>
+                    {editingVal.irr !== 0 ? `${editingVal.irr.toFixed(1)}%` : '—'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Round */}
+              <div>
+                <label className="block text-[12px] font-medium mb-1">Round (optional)</label>
                 <select value={editingVal.round || ''}
                   onChange={e => setEditingVal(v => v ? {...v, round: e.target.value} : null)}
-                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
+                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3] bg-white">
                   <option value="">Select…</option>
                   {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
+
+              {/* Notes */}
               <div>
-                <label className="block text-[12px] font-medium mb-1">Notes</label>
-                <input value={editingVal.notes || ''}
-                  onChange={e => setEditingVal(v => v ? {...v, notes: e.target.value} : null)}
+                <label className="block text-[12px] font-medium mb-1">Notes (optional)</label>
+                <input
+                  value={editingVal.notes?.replace(/^\[.*?\]\s*/, '') || ''}
+                  onChange={e => setEditingVal(v => {
+                    if (!v) return null;
+                    const method = v.notes?.match(/^\[(.+?)\]/)?.[1] || 'Manual Valuation';
+                    return {...v, notes: `[${method}] ${e.target.value}`};
+                  })}
+                  placeholder="Optional notes…"
                   className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
               </div>
             </div>
+
             <div className="flex justify-end gap-2">
               <button onClick={() => setEditingVal(null)}
                 className="px-4 py-2 rounded-[7px] text-[13px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">Cancel</button>

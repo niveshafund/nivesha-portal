@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import Link from 'next/link';
 import ImportModal from '@/components/ImportModal';
-import { getFundById, getCompaniesByFund, getLPsByFund, getTransactionsByFund, getExpensesByFund, getFundMembers, createFundMember, updateFundMember, deleteFundMember, DbFund, DbCompany, DbLP, DbTransaction, DbExpense, DbFundMember, FundMemberRole } from '@/lib/db';
+import { getFundById, getCompaniesByFund, getLPsByFund, getTransactionsByFund, getExpensesByFund, getFundMembers, getValuationsByFund, createFundMember, updateFundMember, deleteFundMember, DbFund, DbCompany, DbLP, DbTransaction, DbExpense, DbFundMember, FundMemberRole, DbValuation } from '@/lib/db';
 
 type Tab = 'overview' | 'portfolio' | 'lps' | 'invested' | 'expenses' | 'members';
 
@@ -306,6 +306,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const [lps, setLPs] = useState<DbLP[]>([]);
   const [txns, setTxns] = useState<DbTransaction[]>([]);
   const [expenses, setExpenses] = useState<DbExpense[]>([]);
+  const [valuations, setValuations] = useState<DbValuation[]>([]);
   const [members, setMembers] = useState<DbFundMember[]>([]);
   const [memberForm, setMemberForm] = useState<{ name: string; email: string; role: FundMemberRole; title: string } | null>(null);
   const [memberSaving, setMemberSaving] = useState(false);
@@ -317,13 +318,14 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   useEffect(() => {
     async function load() {
       try {
-        const [f, cos, lpsData, txnsData, expsData, membersData] = await Promise.all([
+        const [f, cos, lpsData, txnsData, expsData, membersData, valsData] = await Promise.all([
           getFundById(id),
           getCompaniesByFund(id),
           getLPsByFund(id),
           getTransactionsByFund(id),
           getExpensesByFund(id),
           getFundMembers(id),
+          getValuationsByFund(id),
         ]);
         setFund(f);
         setCompanies(cos);
@@ -331,6 +333,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
         setTxns(txnsData);
         setExpenses(expsData);
         setMembers(membersData);
+        setValuations(valsData);
       } finally {
         setLoading(false);
       }
@@ -519,31 +522,51 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
         // Company lookup by id
         const companyMap = Object.fromEntries(companies.map(c => [c.id, c]));
 
+        // Build latest valuation lookup per company
+        // valuations are sorted newest-first from DB
+        const latestValByCompany = valuations.reduce<Record<string, DbValuation>>((acc, v) => {
+          if (v.company_id && !acc[v.company_id]) acc[v.company_id] = v;
+          return acc;
+        }, {});
+
         // Build one row per investment transaction
         const rows = investmentTxns.map(t => {
-          const co           = companyMap[t.company_id!];
-          const entryVal     = t.valuation_cap ?? null;        // valuation at investment
-          const currentVal   = co?.unrealised ?? 0;             // latest valuation
-          const distribAmt   = distribByCompany[t.company_id!] ?? 0;
-          // MOIC = current company valuation / entry valuation cap
-          // Only meaningful if we have both values
-          const moic = (entryVal && entryVal > 0 && currentVal > 0)
-            ? currentVal / entryVal
+          const co         = companyMap[t.company_id!];
+          const entryVal   = t.valuation_cap ?? null;   // company valuation when we invested
+          const latestVal  = t.company_id ? latestValByCompany[t.company_id] : null;
+          // currentInvValue = investment value from latest valuation entry
+          // Falls back to invested amount if no valuation recorded yet
+          const currentInvValue = latestVal?.value ?? t.amount;
+          // currentCoVal = total company valuation (stored in companies.valuation or entry val if no update)
+          const currentCoVal = co?.valuation ?? entryVal ?? 0;
+          const distribAmt = distribByCompany[t.company_id!] ?? 0;
+          // MOIC = current investment value / amount invested
+          const moic = (currentInvValue > 0 && t.amount > 0)
+            ? currentInvValue / t.amount
             : null;
-          // DPI = total distributions for this company / this transaction's invested amount
+          // DPI = total distributions / amount invested
           const dpi = t.amount > 0 && distribAmt > 0 ? distribAmt / t.amount : null;
-          return { t, co, entryVal, currentVal, distribAmt, moic, dpi };
+          // IRR (CAGR) = (currentInvValue / invested) ^ (1/years) - 1
+          const investDate = t.date ? new Date(t.date) : null;
+          const today      = new Date();
+          const years      = investDate
+            ? (today.getTime() - investDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25)
+            : 0;
+          const irr = (years > 0.01 && currentInvValue > 0 && t.amount > 0)
+            ? ((currentInvValue / t.amount) ** (1 / years) - 1) * 100
+            : null;
+          return { t, co, entryVal, currentInvValue, currentCoVal, distribAmt, moic, dpi, irr };
         });
 
         // Footer totals
-        const totalInvested    = rows.reduce((s, r) => s + r.t.amount, 0);
-        const totalCurrentVal  = rows.reduce((s, r) => s + (r.currentVal || 0), 0);
-        const totalDistrib     = Object.values(distribByCompany).reduce((s, v) => s + v, 0);
+        const totalInvested      = rows.reduce((s, r) => s + r.t.amount, 0);
+        const totalCurrentInvVal = rows.reduce((s, r) => s + (r.currentInvValue || 0), 0);
+        const totalDistrib       = Object.values(distribByCompany).reduce((s, v) => s + v, 0);
 
         return (
           <div>
             <p className="text-[12.5px] text-[#6b6860] mb-4">
-              One row per investment transaction. MOIC = Current Valuation ÷ Entry Valuation.
+              One row per investment transaction. MOIC = Current Investment Value ÷ Amount Invested.
             </p>
             <div className="bg-white border border-[#e8e6df] rounded-xl">
               <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
@@ -562,17 +585,17 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                 <table className="w-full border-collapse">
                   <thead>
                     <tr>
-                      {['Company','Sector','Date','Instrument','Invested','Entry Valuation','Current Valuation','Distributions','MOIC','DPI','Status'].map(h => (
+                      {['Company','Sector','Date','Instrument','Invested','Entry Valuation','Current Inv. Value','Current Co. Valuation','Distributions','MOIC','IRR','DPI','Status'].map(h => (
                         <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {rows.length === 0 ? (
-                      <tr><td colSpan={11} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">
+                      <tr><td colSpan={13} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">
                         No investments yet. Click "+ Add Company" to record your first investment.
                       </td></tr>
-                    ) : rows.map(({ t, co, entryVal, currentVal, distribAmt, moic, dpi }) => (
+                    ) : rows.map(({ t, co, entryVal, currentInvValue, currentCoVal, distribAmt, moic, dpi, irr }) => (
                       <tr key={t.id} className="hover:bg-[#f9f8f5] transition-colors">
                         {/* Company */}
                         <td className="px-4 py-2.5 border-b border-[#e8e6df]">
@@ -609,13 +632,17 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">
                           {fmtFull(t.amount)}
                         </td>
-                        {/* Entry Valuation */}
+                        {/* Entry Valuation — company valuation at investment */}
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">
                           {entryVal ? fmtFull(entryVal) : '—'}
                         </td>
-                        {/* Current Valuation */}
-                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">
-                          {currentVal > 0 ? fmtFull(currentVal) : '—'}
+                        {/* Current Investment Value — your stake's worth from latest valuation */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] text-green-700">
+                          {currentInvValue > 0 ? fmtFull(currentInvValue) : '—'}
+                        </td>
+                        {/* Current Company Valuation */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] text-[#6b6860]">
+                          {currentCoVal > 0 ? fmtFull(currentCoVal) : '—'}
                         </td>
                         {/* Distributions */}
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">
@@ -623,9 +650,13 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                             ? <span className="text-green-600">{fmtFull(distribAmt)}</span>
                             : '—'}
                         </td>
-                        {/* MOIC = Current Val / Entry Val */}
+                        {/* MOIC = Current Inv Value / Invested */}
                         <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${moic != null ? moicColor(moic) : 'text-[#9b9890]'}`}>
                           {moic != null ? `${moic.toFixed(2)}x` : '—'}
+                        </td>
+                        {/* IRR */}
+                        <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12px] ${irr != null && irr > 0 ? 'text-green-600' : irr != null && irr < 0 ? 'text-red-600' : 'text-[#9b9890]'}`}>
+                          {irr != null ? `${irr.toFixed(1)}%` : '—'}
                         </td>
                         {/* DPI = Distributions / Invested */}
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">
@@ -644,33 +675,35 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                     {/* ── Footer totals row ── */}
                     {rows.length > 0 && (
                       <tr className="bg-[#f9f8f5] text-[12px] font-medium border-t-2 border-[#e8e6df]">
+                        {/* Company count */}
                         <td className="px-4 py-3 text-[#6b6860]" colSpan={4}>
-                          {rows.length} investment{rows.length !== 1 ? 's' : ''} · {companies.length} compan{companies.length !== 1 ? 'ies' : 'y'}
+                          {companies.length} compan{companies.length !== 1 ? 'ies' : 'y'} · {rows.length} investment{rows.length !== 1 ? 's' : ''}
                         </td>
                         {/* Total Invested */}
                         <td className="px-4 py-3 font-mono font-semibold">{fmtFull(totalInvested)}</td>
-                        {/* Entry Valuation total — sum of all entry caps */}
-                        <td className="px-4 py-3 font-mono text-[#6b6860]">
-                          {rows.some(r => r.entryVal) ? fmtFull(rows.reduce((s, r) => s + (r.entryVal || 0), 0)) : '—'}
-                        </td>
-                        {/* Total Current Valuation */}
+                        {/* Entry Valuation — no total */}
+                        <td className="px-4 py-3 text-[#9b9890]">—</td>
+                        {/* Total Current Investment Value */}
                         <td className="px-4 py-3 font-mono font-semibold text-green-700">
-                          {totalCurrentVal > 0 ? fmtFull(totalCurrentVal) : '—'}
+                          {totalCurrentInvVal > 0 ? fmtFull(totalCurrentInvVal) : '—'}
                         </td>
+                        {/* Current Co. Valuation — no total */}
+                        <td className="px-4 py-3 text-[#9b9890]">—</td>
                         {/* Total Distributions */}
                         <td className="px-4 py-3 font-mono font-semibold text-green-600">
                           {totalDistrib > 0 ? fmtFull(totalDistrib) : '—'}
                         </td>
-                        {/* Blended MOIC across portfolio */}
+                        {/* Blended MOIC */}
                         <td className="px-4 py-3">
                           {(() => {
-                            const totalEntryVal = rows.reduce((s, r) => s + (r.entryVal || 0), 0);
-                            const blended = totalEntryVal > 0 && totalCurrentVal > 0 ? totalCurrentVal / totalEntryVal : null;
+                            const blended = totalInvested > 0 && totalCurrentInvVal > 0 ? totalCurrentInvVal / totalInvested : null;
                             return blended != null
                               ? <span className={moicColor(blended)}>{blended.toFixed(2)}x</span>
                               : '—';
                           })()}
                         </td>
+                        {/* IRR — no total */}
+                        <td className="px-4 py-3 text-[#9b9890]">—</td>
                         {/* DPI total */}
                         <td className="px-4 py-3 text-[#6b6860]">
                           {totalInvested > 0 && totalDistrib > 0 ? `${(totalDistrib / totalInvested).toFixed(2)}x` : '—'}
