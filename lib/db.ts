@@ -137,6 +137,7 @@ export type DbValuation = {
   irr: number;
   round?: string;
   notes?: string;
+  company_value?: number;
   created_at: string;
 };
 

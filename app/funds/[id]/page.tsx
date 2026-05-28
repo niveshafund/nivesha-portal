@@ -318,14 +318,13 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   useEffect(() => {
     async function load() {
       try {
-        const [f, cos, lpsData, txnsData, expsData, membersData, valsData] = await Promise.all([
+        const [f, cos, lpsData, txnsData, expsData, membersData] = await Promise.all([
           getFundById(id),
           getCompaniesByFund(id),
           getLPsByFund(id),
           getTransactionsByFund(id),
           getExpensesByFund(id),
           getFundMembers(id),
-          getValuationsByFund(id),
         ]);
         setFund(f);
         setCompanies(cos);
@@ -333,7 +332,13 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
         setTxns(txnsData);
         setExpenses(expsData);
         setMembers(membersData);
-        setValuations(valsData);
+        // Load valuations separately — failure here must not break company links
+        try {
+          const valsData = await getValuationsByFund(id);
+          setValuations(valsData);
+        } catch (e) {
+          console.warn('Valuations load failed:', e);
+        }
       } finally {
         setLoading(false);
       }
@@ -537,8 +542,11 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
           // currentInvValue = investment value from latest valuation entry
           // Falls back to invested amount if no valuation recorded yet
           const currentInvValue = latestVal?.value ?? t.amount;
-          // currentCoVal = total company valuation (stored in companies.valuation or entry val if no update)
-          const currentCoVal = co?.valuation ?? entryVal ?? 0;
+          // currentCoVal: latest valuation company_value → companies.valuation → entryVal
+          const currentCoVal = (latestVal as any)?.company_value
+            ?? co?.valuation
+            ?? entryVal
+            ?? 0;
           const distribAmt = distribByCompany[t.company_id!] ?? 0;
           // MOIC = current investment value / amount invested
           const moic = (currentInvValue > 0 && t.amount > 0)
