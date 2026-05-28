@@ -51,14 +51,21 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
 
   // New valuation form
   const [showAddTxnForm, setShowAddTxnForm] = useState(false);
-  const [newTxnForm, setNewTxnForm] = useState({ date: new Date().toISOString().split('T')[0], type: 'Investment', amount: '', instrument: 'SAFE', description: '', round: '' });
+  const [newTxnForm, setNewTxnForm] = useState({ date: new Date().toISOString().split('T')[0], type: 'Investment', amount: '', instrument: 'SAFE', safeType: 'with valuation cap and discount', discount: '', valuationCap: '', valuationType: 'Post-money', sharePrice: '', numShares: '', description: '', round: '' });
   const [savingNewTxn, setSavingNewTxn] = useState(false);
   const [editingTxn, setEditingTxn] = useState<DbTransaction | null>(null);
   const [savingTxnEdit, setSavingTxnEdit] = useState(false);
   const [editingVal, setEditingVal] = useState<DbValuation | null>(null);
   const [savingValEdit, setSavingValEdit] = useState(false);
   const [showValForm, setShowValForm] = useState(false);
-  const [valForm, setValForm] = useState({ quarter: 'Q1 2026', value: '', moic: '', irr: '', round: '', notes: '' });
+  const [valForm, setValForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    method: 'Recent Funding Round',
+    investmentValue: '',
+    companyValue: '',
+    round: '',
+    notes: '',
+  });
   const [savingVal, setSavingVal] = useState(false);
 
   // New update form
@@ -135,23 +142,35 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
     if (!newTxnForm.amount || !newTxnForm.date) return;
     setSavingNewTxn(true);
     try {
+      // Build description from SAFE terms
       const parts: string[] = [];
+      if (newTxnForm.instrument === 'SAFE' || newTxnForm.instrument === 'Convertible Note') {
+        if (newTxnForm.safeType) parts.push(newTxnForm.safeType);
+        if (newTxnForm.discount) parts.push(`${newTxnForm.discount}% discount`);
+        if (newTxnForm.valuationCap) parts.push(`${newTxnForm.valuationType} valuation cap: $${Number(newTxnForm.valuationCap).toLocaleString()}`);
+      } else if (['Preferred Stock','Common Stock','Equity'].includes(newTxnForm.instrument)) {
+        if (newTxnForm.sharePrice) parts.push(`$${newTxnForm.sharePrice} per share`);
+        if (newTxnForm.numShares) parts.push(`${Number(newTxnForm.numShares).toLocaleString()} shares`);
+        if (newTxnForm.valuationCap) parts.push(`Post-money valuation: $${Number(newTxnForm.valuationCap).toLocaleString()}`);
+      }
       if (newTxnForm.description) parts.push(newTxnForm.description);
       if (newTxnForm.round) parts.push(newTxnForm.round);
 
       await createTransaction({
-        fund_id:      fundId,
-        company_id:   companyId,
-        company_name: company!.name,
-        date:         newTxnForm.date,
-        type:         newTxnForm.type as any,
-        amount:       Number(newTxnForm.amount),
-        instrument:   newTxnForm.instrument as any,
-        description:  parts.join(' · ') || undefined,
+        fund_id:       fundId,
+        company_id:    companyId,
+        company_name:  company!.name,
+        date:          newTxnForm.date,
+        type:          newTxnForm.type as any,
+        amount:        Number(newTxnForm.amount),
+        instrument:    newTxnForm.instrument as any,
+        description:   parts.join(' · ') || undefined,
+        discount_pct:  newTxnForm.discount ? Number(newTxnForm.discount) : undefined,
+        valuation_cap: newTxnForm.valuationCap ? Number(newTxnForm.valuationCap) : undefined,
       });
       const t = await getTransactionsByCompany(companyId);
       setTxns(t);
-      setNewTxnForm({ date: new Date().toISOString().split('T')[0], type: 'Investment', amount: '', instrument: 'SAFE', description: '', round: '' });
+      setNewTxnForm({ date: new Date().toISOString().split('T')[0], type: 'Investment', amount: '', instrument: 'SAFE', safeType: 'with valuation cap and discount', discount: '', valuationCap: '', valuationType: 'Post-money', sharePrice: '', numShares: '', description: '', round: '' });
       setShowAddTxnForm(false);
     } catch (err: any) {
       alert('Failed to add transaction: ' + err.message);
@@ -205,6 +224,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
     if (!editingVal) return;
     setSavingValEdit(true);
     try {
+      const editCoVal = (editingVal as any).company_value ? Number((editingVal as any).company_value) : null;
       await upsertValuation({
         company_id:  companyId,
         fund_id:     fundId,
@@ -215,9 +235,18 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
         irr:         editingVal.irr,
         round:       editingVal.round || undefined,
         notes:       editingVal.notes || undefined,
+        ...(editCoVal ? { company_value: editCoVal } as any : {}),
       });
-      const v = await getValuationsByCompany(companyId);
+      // Sync companies table
+      await updateCompany(companyId, {
+        unrealised: editingVal.value,
+        moic: editingVal.moic,
+        irr: editingVal.irr,
+        ...(editCoVal ? { valuation: editCoVal } : {}),
+      });
+      const [v, co] = await Promise.all([getValuationsByCompany(companyId), getCompanyById(companyId)]);
       setVals(v);
+      if (co) setCompany(co);
       setEditingVal(null);
     } catch (err: any) {
       alert('Failed to update valuation: ' + err.message);
@@ -227,23 +256,53 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   };
 
   const handleAddValuation = async () => {
-    if (!valForm.value) return;
+    if (!valForm.investmentValue || !valForm.date) return;
     setSavingVal(true);
     try {
+      const newVal = Number(valForm.investmentValue);
+      const companyVal = valForm.companyValue ? Number(valForm.companyValue) : null;
+
+      // Derive quarter from date
+      const d = new Date(valForm.date);
+      const qNum = d.getMonth() < 3 ? 1 : d.getMonth() < 6 ? 2 : d.getMonth() < 9 ? 3 : 4;
+      const derivedQuarter = `Q${qNum} ${d.getFullYear()}`;
+      const derivedQuarterEnd = QUARTER_END[derivedQuarter] ?? valForm.date;
+
+      // Auto-calculate MOIC = investment value / total invested
+      const newMoic = totalInvested > 0 ? newVal / totalInvested : 0;
+
+      // Auto-calculate IRR (CAGR)
+      const investDate = investmentTxns[0]?.date ? new Date(investmentTxns[0].date) : null;
+      const valDate = new Date(valForm.date);
+      const years = investDate ? (valDate.getTime() - investDate.getTime()) / (1000*60*60*24*365.25) : 0;
+      const newIrr = years > 0.01 && newVal > 0 && totalInvested > 0
+        ? ((newVal / totalInvested) ** (1/years) - 1) * 100 : 0;
+
       await upsertValuation({
         company_id:  companyId,
         fund_id:     fundId,
-        quarter:     valForm.quarter,
-        quarter_end: QUARTER_END[valForm.quarter] ?? valForm.quarter,
-        value:       Number(valForm.value),
-        moic:        valForm.moic ? Number(valForm.moic) : 0,
-        irr:         valForm.irr  ? Number(valForm.irr)  : 0,
+        quarter:     derivedQuarter,
+        quarter_end: derivedQuarterEnd,
+        value:       newVal,
+        moic:        newMoic,
+        irr:         newIrr,
         round:       valForm.round || undefined,
-        notes:       valForm.notes || undefined,
+        notes:       valForm.notes ? `[${valForm.method}] ${valForm.notes}` : `[${valForm.method}]`,
+        ...(companyVal ? { company_value: companyVal } as any : {}),
       });
-      const v = await getValuationsByCompany(companyId);
+
+      // Sync companies table
+      await updateCompany(companyId, {
+        unrealised: newVal,
+        moic: newMoic,
+        irr: newIrr,
+        ...(companyVal ? { valuation: companyVal } : {}),
+      });
+
+      const [v, co] = await Promise.all([getValuationsByCompany(companyId), getCompanyById(companyId)]);
       setVals(v);
-      setValForm({ quarter: 'Q1 2026', value: '', moic: '', irr: '', round: '', notes: '' });
+      if (co) setCompany(co);
+      setValForm({ date: new Date().toISOString().split('T')[0], method: 'Recent Funding Round', investmentValue: '', companyValue: '', round: '', notes: '' });
       setShowValForm(false);
     } catch (err: any) {
       alert('Failed to add valuation: ' + err.message);
@@ -323,8 +382,16 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   );
 
   const inputCls = 'w-full px-3 py-2.5 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] font-sans outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 transition-colors';
-  const totalInvested = txns.filter(t => t.type === 'Investment').reduce((s,t) => s + t.amount, 0);
-  const latestVal     = valuations[0];
+  const totalInvested     = txns.filter(t => t.type === 'Investment').reduce((s,t) => s + t.amount, 0);
+  const latestVal         = valuations[0] ?? null;
+  const investmentTxns    = txns.filter(t => t.type === 'Investment').sort((a,b) => a.date.localeCompare(b.date));
+  const currentValue      = latestVal ? latestVal.value : (company.unrealised || 0);
+  const computedMoic      = currentValue > 0 && totalInvested > 0 ? currentValue / totalInvested : null;
+  const investDate        = investmentTxns[0]?.date ? new Date(investmentTxns[0].date) : null;
+  const today             = new Date();
+  const years             = investDate ? (today.getTime() - investDate.getTime()) / (1000*60*60*24*365.25) : 0;
+  const computedIrr       = years > 0.01 && currentValue > 0 && totalInvested > 0
+    ? ((currentValue / totalInvested) ** (1/years) - 1) * 100 : null;
 
   const tabs: { key: Tab; label: string }[] = fromTab === 'invested'
     ? [
@@ -379,9 +446,9 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       <div className="grid grid-cols-4 gap-3 mb-4">
         {[
           { label: 'Invested Capital', value: fmtFull(totalInvested), cls: '' },
-          { label: 'Current Value',    value: latestVal ? fmtFull(latestVal.value) : fmtFull(company.unrealised), cls: '' },
-          { label: 'MOIC',             value: company.moic > 0 ? `${company.moic.toFixed(2)}x` : '—', cls: moicColor(company.moic) },
-          { label: 'IRR',              value: company.irr !== 0 ? `${company.irr.toFixed(1)}%` : '—', cls: irrColor(company.irr) },
+          { label: 'Current Value',    value: currentValue > 0 ? fmtFull(currentValue) : '—', cls: '' },
+          { label: 'MOIC',             value: computedMoic != null ? `${computedMoic.toFixed(2)}x` : '—', cls: computedMoic != null ? moicColor(computedMoic) : 'text-[#9b9890]' },
+          { label: 'IRR',              value: computedIrr != null ? `${computedIrr.toFixed(1)}%` : '—', cls: computedIrr != null ? irrColor(computedIrr) : 'text-[#9b9890]' },
         ].map(k => (
           <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
             <label className="text-[11px] text-[#6b6860] block mb-1.5">{k.label}</label>
@@ -593,6 +660,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
             <div className="px-5 py-4 border-b border-[#e8e6df] bg-[#f9f8f5]">
               <div className="text-[13px] font-semibold mb-1">New Transaction for {company?.name}</div>
               <p className="text-[11.5px] text-[#9b9890] mb-3">Company is pre-selected. Fill in the transaction details below.</p>
+              {/* Row 1: Date, Type, Amount */}
               <div className="grid grid-cols-3 gap-3 mb-3">
                 <div>
                   <label className="block text-[11.5px] font-medium mb-1">Date *</label>
@@ -620,6 +688,10 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                       className="w-full pl-6 pr-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
                   </div>
                 </div>
+              </div>
+
+              {/* Row 2: Instrument, Round, Notes */}
+              <div className="grid grid-cols-3 gap-3 mb-3">
                 <div>
                   <label className="block text-[11.5px] font-medium mb-1">Instrument</label>
                   <select value={newTxnForm.instrument}
@@ -643,13 +715,120 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[11.5px] font-medium mb-1">Terms / Notes</label>
+                  <label className="block text-[11.5px] font-medium mb-1">Notes</label>
                   <input value={newTxnForm.description}
                     onChange={e => setNewTxnForm(f => ({...f, description: e.target.value}))}
-                    placeholder="e.g., with valuation cap, 20% discount"
+                    placeholder="Additional notes"
                     className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
                 </div>
               </div>
+
+              {/* Preferred Stock / Common Stock terms */}
+              {(newTxnForm.instrument === 'Preferred Stock' || newTxnForm.instrument === 'Common Stock' || newTxnForm.instrument === 'Equity') && (
+                <div className="border border-[#2d5be3]/20 rounded-[7px] bg-[#f5f7ff] p-3 mb-3">
+                  <div className="text-[11.5px] font-semibold text-[#2d5be3] mb-2">{newTxnForm.instrument} Terms</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11.5px] font-medium mb-1">Share Price (optional)</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
+                        <input type="number" step="0.0001" value={newTxnForm.sharePrice}
+                          onChange={e => setNewTxnForm(f => ({...f, sharePrice: e.target.value}))}
+                          placeholder="e.g. 1.33"
+                          className="w-full pl-6 pr-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3] bg-white" />
+                      </div>
+                      <p className="text-[11px] text-[#9b9890] mt-1">Price per share</p>
+                    </div>
+                    <div>
+                      <label className="block text-[11.5px] font-medium mb-1">Number of Shares (optional)</label>
+                      <input type="number" value={newTxnForm.numShares}
+                        onChange={e => setNewTxnForm(f => ({...f, numShares: e.target.value}))}
+                        placeholder="e.g. 150075"
+                        className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3] bg-white" />
+                      {newTxnForm.sharePrice && newTxnForm.numShares && (
+                        <p className="text-[11px] text-[#9b9890] mt-1">
+                          Total: ${(Number(newTxnForm.sharePrice) * Number(newTxnForm.numShares)).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-[11.5px] font-medium mb-1">Post-Money Valuation (optional)</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
+                        <input type="number" value={newTxnForm.valuationCap}
+                          onChange={e => setNewTxnForm(f => ({...f, valuationCap: e.target.value}))}
+                          placeholder="e.g. 10000000"
+                          className="w-full pl-6 pr-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3] bg-white" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SAFE / Convertible Note terms */}
+              {(newTxnForm.instrument === 'SAFE' || newTxnForm.instrument === 'Convertible Note') && (
+                <div className="border border-[#2d5be3]/20 rounded-[7px] bg-[#f5f7ff] p-3 mb-3">
+                  <div className="text-[11.5px] font-semibold text-[#2d5be3] mb-2">
+                    {newTxnForm.instrument} Terms
+                  </div>
+                  {/* SAFE Structure */}
+                  <div className="mb-3">
+                    <label className="block text-[11.5px] font-medium mb-1.5">Structure</label>
+                    <div className="flex flex-col gap-1.5">
+                      {['with valuation cap and discount','with valuation cap, no discount','with discount, no valuation cap'].map(s => (
+                        <button key={s} type="button"
+                          onClick={() => setNewTxnForm(f => ({...f, safeType: s}))}
+                          className={'px-3 py-1.5 rounded-[7px] text-[12px] font-medium border text-left transition-all ' +
+                            (newTxnForm.safeType === s ? 'bg-[#2d5be3] text-white border-[#2d5be3]' : 'bg-white text-[#6b6860] border-[#e8e6df] hover:border-[#2d5be3]')}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Valuation Cap */}
+                    {newTxnForm.safeType !== 'with discount, no valuation cap' && (
+                      <div>
+                        <label className="block text-[11.5px] font-medium mb-1">Valuation Cap</label>
+                        <div className="flex gap-2 items-center">
+                          <div className="relative flex-1">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
+                            <input type="number" value={newTxnForm.valuationCap}
+                              onChange={e => setNewTxnForm(f => ({...f, valuationCap: e.target.value}))}
+                              placeholder="e.g. 5000000"
+                              className="w-full pl-6 pr-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3] bg-white" />
+                          </div>
+                          <div className="flex border border-[#e8e6df] rounded-[7px] overflow-hidden flex-shrink-0">
+                            {(['Pre-money','Post-money'] as const).map(v => (
+                              <button key={v} type="button"
+                                onClick={() => setNewTxnForm(f => ({...f, valuationType: v}))}
+                                className={'px-2 py-2 text-[11px] font-medium transition-colors ' +
+                                  (newTxnForm.valuationType === v ? 'bg-[#2d5be3] text-white' : 'bg-white text-[#6b6860] hover:bg-[#f9f8f5]')}>
+                                {v}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {/* Discount % */}
+                    {newTxnForm.safeType !== 'with valuation cap, no discount' && (
+                      <div>
+                        <label className="block text-[11.5px] font-medium mb-1">Discount %</label>
+                        <div className="relative">
+                          <input type="number" step="0.5" min="0" max="50"
+                            value={newTxnForm.discount}
+                            onChange={e => setNewTxnForm(f => ({...f, discount: e.target.value}))}
+                            placeholder="e.g. 20"
+                            className="w-full px-3 py-2 pr-7 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3] bg-white" />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">%</span>
+                        </div>
+                        <p className="text-[11px] text-[#9b9890] mt-1">Typically 15–20%</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="flex gap-2">
                 <button onClick={handleAddNewTxn} disabled={savingNewTxn || !newTxnForm.amount || !newTxnForm.date}
                   className="px-3 py-1.5 rounded-[7px] text-[12px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
@@ -721,62 +900,151 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
           </div>
 
           {showValForm && (
-            <div className="px-5 py-4 border-b border-[#e8e6df] bg-[#f9f8f5]">
-              <div className="text-[13px] font-semibold mb-3">New Valuation</div>
-              <div className="grid grid-cols-3 gap-3 mb-3">
-                <div>
-                  <label className="block text-[11.5px] font-medium mb-1">Quarter *</label>
-                  <select value={valForm.quarter} onChange={e => setValForm(f => ({...f, quarter: e.target.value}))} className={inputCls}>
-                    {QUARTERS.map(q => <option key={q} value={q}>{q}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[11.5px] font-medium mb-1">Company Value (USD) *</label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
-                    <input type="number" value={valForm.value} onChange={e => setValForm(f => ({...f, value: e.target.value}))}
-                      placeholder="0" className={inputCls + ' pl-6'} />
+            <div className="border-b border-[#e8e6df]">
+              <div className="flex">
+                {/* Left: form */}
+                <div className="flex-1 px-5 py-5">
+                  <div className="text-[13.5px] font-semibold mb-4">New Valuation</div>
+
+                  {/* Date + Method */}
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className="block text-[11.5px] font-medium mb-1">Valuation Date *</label>
+                      <input type="date" value={valForm.date}
+                        onChange={e => setValForm(f => ({...f, date: e.target.value}))}
+                        className={inputCls} />
+                      {valForm.date && (() => {
+                        const d = new Date(valForm.date);
+                        const q = `Q${d.getMonth()<3?1:d.getMonth()<6?2:d.getMonth()<9?3:4} ${d.getFullYear()}`;
+                        return <p className="text-[11px] text-[#9b9890] mt-1">📅 Quarter: {q}</p>;
+                      })()}
+                    </div>
+                    <div>
+                      <label className="block text-[11.5px] font-medium mb-1">Valuation Method</label>
+                      <select value={valForm.method} onChange={e => setValForm(f => ({...f, method: e.target.value}))} className={inputCls}>
+                        {['Recent Funding Round','Manual Valuation','Metrics Based','Share Price','Discounted Cash Flow','Comparable Multiples'].map(m => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Investment Value + Company Value */}
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className="block text-[11.5px] font-medium mb-1">Investment Value *</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
+                        <input type="number" value={valForm.investmentValue}
+                          onChange={e => setValForm(f => ({...f, investmentValue: e.target.value}))}
+                          placeholder="Your stake's current worth"
+                          className={inputCls + ' pl-6'} />
+                      </div>
+                      <p className="text-[11px] text-[#9b9890] mt-1">Your stake's current worth. Drives MOIC.</p>
+                      {valForm.investmentValue && Number(valForm.investmentValue) > 0 && totalInvested > 0 && (() => {
+                        const moic = Number(valForm.investmentValue) / totalInvested;
+                        const d = new Date(valForm.date); const inv = investmentTxns[0]?.date ? new Date(investmentTxns[0].date) : null;
+                        const yrs = inv ? (d.getTime()-inv.getTime())/(1000*60*60*24*365.25) : 0;
+                        const irr = yrs > 0.01 ? ((Number(valForm.investmentValue)/totalInvested)**(1/yrs)-1)*100 : null;
+                        return <p className="text-[11.5px] mt-1">
+                          <span className={`font-semibold ${moic>=1?'text-green-600':'text-red-500'}`}>MOIC: {moic.toFixed(2)}x</span>
+                          {irr != null && <span className={`ml-2 font-semibold ${irr>=0?'text-green-600':'text-red-500'}`}>IRR: {irr.toFixed(1)}%</span>}
+                        </p>;
+                      })()}
+                    </div>
+                    <div>
+                      <label className="block text-[11.5px] font-medium mb-1">Total Company Value <span className="text-[#9b9890] font-normal">(optional)</span></label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
+                        <input type="number" value={valForm.companyValue}
+                          onChange={e => setValForm(f => ({...f, companyValue: e.target.value}))}
+                          placeholder="Full enterprise value"
+                          className="w-full pl-6 pr-3 py-2.5 rounded-[7px] border border-dashed border-[#c8c6bf] bg-white text-[13px] font-sans outline-none focus:border-[#2d5be3] transition-colors" />
+                      </div>
+                      <p className="text-[11px] text-[#9b9890] mt-1">100% company value. For reporting only.</p>
+                    </div>
+                  </div>
+
+                  {/* Round + Notes */}
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className="block text-[11.5px] font-medium mb-1">Round (optional)</label>
+                      <select value={valForm.round} onChange={e => setValForm(f => ({...f, round: e.target.value}))} className={inputCls}>
+                        <option value="">Select…</option>
+                        {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11.5px] font-medium mb-1">Notes (optional)</label>
+                      <input value={valForm.notes} onChange={e => setValForm(f => ({...f, notes: e.target.value}))}
+                        placeholder="Document assumptions…" className={inputCls} />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button onClick={handleAddValuation} disabled={savingVal || !valForm.investmentValue || !valForm.date}
+                      className="px-5 py-2 rounded-[7px] text-[13px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
+                      {savingVal ? 'Saving...' : 'Create Valuation'}
+                    </button>
+                    <button onClick={() => setShowValForm(false)}
+                      className="px-5 py-2 rounded-[7px] text-[13px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                      Cancel
+                    </button>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-[11.5px] font-medium mb-1">Round (optional)</label>
-                  <select value={valForm.round} onChange={e => setValForm(f => ({...f, round: e.target.value}))} className={inputCls}>
-                    <option value="">Select…</option>
-                    {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
+
+                {/* Right panel */}
+                <div className="w-[240px] border-l border-[#e8e6df] flex flex-col flex-shrink-0">
+                  <div className="px-4 py-4 border-b border-[#e8e6df]">
+                    <div className="text-[12.5px] font-semibold mb-3">{company.name}</div>
+                    <div className="space-y-2 text-[12px]">
+                      <div className="flex justify-between"><span className="text-[#9b9890]">Total Invested</span><span className="font-mono font-medium">{fmtFull(totalInvested)}</span></div>
+                      <div className="flex justify-between"><span className="text-[#9b9890]">Entry Val Cap</span><span className="font-mono">{investmentTxns[0]?.valuation_cap ? fmtFull(investmentTxns[0].valuation_cap) : '—'}</span></div>
+                      {valForm.investmentValue && Number(valForm.investmentValue) > 0 && (
+                        <div className="flex justify-between pt-1 border-t border-[#e8e6df]">
+                          <span className="text-[#9b9890]">New Value</span>
+                          <span className="font-mono font-semibold text-green-600">{fmtFull(Number(valForm.investmentValue))}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {valuations.length > 0 && (
+                    <div className="px-4 py-4 border-b border-[#e8e6df]">
+                      <div className="text-[10.5px] font-semibold text-[#9b9890] uppercase tracking-wide mb-2.5">📊 Previous Valuations</div>
+                      <div className="space-y-2">
+                        {valuations.slice(0,4).map(v => (
+                          <div key={v.id} className="bg-[#f9f8f5] rounded-lg px-3 py-2">
+                            <div className="flex justify-between mb-0.5">
+                              <span className="text-[11px] font-medium">{v.quarter}</span>
+                              <span className={`text-[11px] font-semibold ${moicColor(v.moic)}`}>{v.moic>0?`${v.moic.toFixed(2)}x`:'—'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="font-mono text-[12px] font-semibold">{fmtFull(v.value)}</span>
+                              <span className="text-[10px] text-[#9b9890]">{v.notes?.match(/^\[(.+?)\]/)?.[1]||v.round||'manual'}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="px-4 py-4 bg-amber-50 flex-1">
+                    <div className="text-[11.5px] font-semibold text-amber-700 mb-2">💡 Valuation Tips</div>
+                    <ul className="space-y-1.5 text-[11px] text-amber-800">
+                      <li>• Consider recent funding rounds</li>
+                      <li>• Review comparable company metrics</li>
+                      <li>• Account for company progress</li>
+                      <li>• Document your methodology in notes</li>
+                      <li>• Account for dilution when entering investment value</li>
+                    </ul>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-[11.5px] font-medium mb-1">MOIC</label>
-                  <input type="number" step="0.01" value={valForm.moic} onChange={e => setValForm(f => ({...f, moic: e.target.value}))}
-                    placeholder="auto" className={inputCls} />
-                </div>
-                <div>
-                  <label className="block text-[11.5px] font-medium mb-1">IRR (%)</label>
-                  <input type="number" step="0.1" value={valForm.irr} onChange={e => setValForm(f => ({...f, irr: e.target.value}))}
-                    placeholder="0" className={inputCls} />
-                </div>
-                <div>
-                  <label className="block text-[11.5px] font-medium mb-1">Notes</label>
-                  <input value={valForm.notes} onChange={e => setValForm(f => ({...f, notes: e.target.value}))}
-                    placeholder="Optional notes" className={inputCls} />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={handleAddValuation} disabled={savingVal}
-                  className="px-3 py-1.5 rounded-[7px] text-[12px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
-                  {savingVal ? 'Saving...' : 'Save Valuation'}
-                </button>
-                <button onClick={() => setShowValForm(false)}
-                  className="px-3 py-1.5 rounded-[7px] text-[12px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
-                  Cancel
-                </button>
               </div>
             </div>
           )}
 
           <table className="w-full border-collapse">
             <thead><tr>
-              {['Quarter','Company Value','MOIC','IRR','Round','Notes','Actions'].map(h => (
+              {['Quarter','Investment Value','Company Valuation','Method','MOIC','IRR','Round','Actions'].map(h => (
                 <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5]">{h}</th>
               ))}
             </tr></thead>
@@ -790,11 +1058,12 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                   <td className="px-4 py-2.5 border-b border-[#e8e6df]">
                     <span className="px-1.5 py-0.5 rounded text-[11px] bg-[#f9f8f5] border border-[#e8e6df]">{v.quarter}</span>
                   </td>
-                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] font-medium">{fmtFull(v.value)}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] font-medium text-green-700">{fmtFull(v.value)}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] text-[#6b6860]">{(v as any).company_value ? fmtFull(Number((v as any).company_value)) : '—'}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{v.notes?.match(/^\[(.+?)\]/)?.[1] || '—'}</td>
                   <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${moicColor(v.moic)}`}>{v.moic > 0 ? `${v.moic.toFixed(2)}x` : '—'}</td>
                   <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${irrColor(v.irr)}`}>{v.irr !== 0 ? `${v.irr.toFixed(1)}%` : '—'}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{v.round || '—'}</td>
-                  <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{v.notes || '—'}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] whitespace-nowrap">
                     <div className="flex gap-2">
                       <button onClick={() => setEditingVal({...v})}

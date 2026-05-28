@@ -534,8 +534,16 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
           return acc;
         }, {});
 
+        // Sort investment txns: group by company name, then by date within each company
+        const sortedInvestmentTxns = [...investmentTxns].sort((a, b) => {
+          const nameA = a.company_name.toLowerCase();
+          const nameB = b.company_name.toLowerCase();
+          if (nameA !== nameB) return nameA.localeCompare(nameB);
+          return a.date.localeCompare(b.date);
+        });
+
         // Build one row per investment transaction
-        const rows = investmentTxns.map(t => {
+        const rows = sortedInvestmentTxns.map(t => {
           const co         = companyMap[t.company_id!];
           const entryVal   = t.valuation_cap ?? null;   // company valuation when we invested
           const latestVal  = t.company_id ? latestValByCompany[t.company_id] : null;
@@ -593,7 +601,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                 <table className="w-full border-collapse">
                   <thead>
                     <tr>
-                      {['Company','Sector','Date','Instrument','Invested','Entry Valuation','Current Inv. Value','Current Co. Valuation','Distributions','MOIC','IRR','DPI','Status'].map(h => (
+                      {['Company','Sector','Date','Instrument','Invested','Entry Valuation','Current Inv. Value','Current Co. Valuation','MOIC','IRR','Distributions','DPI','Status'].map(h => (
                         <th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -652,12 +660,6 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] text-[#6b6860]">
                           {currentCoVal > 0 ? fmtFull(currentCoVal) : '—'}
                         </td>
-                        {/* Distributions */}
-                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">
-                          {distribAmt > 0
-                            ? <span className="text-green-600">{fmtFull(distribAmt)}</span>
-                            : '—'}
-                        </td>
                         {/* MOIC = Current Inv Value / Invested */}
                         <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${moic != null ? moicColor(moic) : 'text-[#9b9890]'}`}>
                           {moic != null ? `${moic.toFixed(2)}x` : '—'}
@@ -665,6 +667,12 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                         {/* IRR */}
                         <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12px] ${irr != null && irr > 0 ? 'text-green-600' : irr != null && irr < 0 ? 'text-red-600' : 'text-[#9b9890]'}`}>
                           {irr != null ? `${irr.toFixed(1)}%` : '—'}
+                        </td>
+                        {/* Distributions */}
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">
+                          {distribAmt > 0
+                            ? <span className="text-green-600">{fmtFull(distribAmt)}</span>
+                            : '—'}
                         </td>
                         {/* DPI = Distributions / Invested */}
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">
@@ -697,10 +705,6 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                         </td>
                         {/* Current Co. Valuation — no total */}
                         <td className="px-4 py-3 text-[#9b9890]">—</td>
-                        {/* Total Distributions */}
-                        <td className="px-4 py-3 font-mono font-semibold text-green-600">
-                          {totalDistrib > 0 ? fmtFull(totalDistrib) : '—'}
-                        </td>
                         {/* Blended MOIC */}
                         <td className="px-4 py-3">
                           {(() => {
@@ -712,6 +716,10 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                         </td>
                         {/* IRR — no total */}
                         <td className="px-4 py-3 text-[#9b9890]">—</td>
+                        {/* Total Distributions */}
+                        <td className="px-4 py-3 font-mono font-semibold text-green-600">
+                          {totalDistrib > 0 ? fmtFull(totalDistrib) : '—'}
+                        </td>
                         {/* DPI total */}
                         <td className="px-4 py-3 text-[#6b6860]">
                           {totalInvested > 0 && totalDistrib > 0 ? `${(totalDistrib / totalInvested).toFixed(2)}x` : '—'}
