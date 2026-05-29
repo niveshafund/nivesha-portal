@@ -1,41 +1,67 @@
 'use client';
 // app/auth/callback/page.tsx
 
-import { useEffect } from 'react';
+export const dynamic = 'force-dynamic';
+
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 export default function AuthCallbackPage() {
   const router = useRouter();
+  const [status, setStatus] = useState('Signing you in…');
 
   useEffect(() => {
     const handleCallback = async () => {
-      // Supabase puts tokens in the URL hash: #access_token=...&refresh_token=...
-      const hash = window.location.hash;
+      const hash = window.location.hash.substring(1);
+      const hashParams = new URLSearchParams(hash);
 
-      if (hash) {
-        // Let Supabase parse the hash and set the session
-        const { data, error } = await supabase.auth.getSession();
-        if (data.session) {
-          router.replace('/');
-          return;
-        }
+      const accessToken  = hashParams.get('access_token');
+      const refreshToken = hashParams.get('refresh_token');
+      const hashError    = hashParams.get('error');
+      const errorDesc    = hashParams.get('error_description');
+
+      // Hash has error
+      if (hashError) {
+        setStatus(errorDesc || hashError);
+        setTimeout(() => router.replace('/login?error=auth'), 2000);
+        return;
       }
 
-      // Also check query params (token_hash flow)
-      const params = new URLSearchParams(window.location.search);
-      const token_hash = params.get('token_hash') || params.get('token');
-      const type = params.get('type') as any;
-
-      if (token_hash && type) {
-        const { error } = await supabase.auth.verifyOtp({ token_hash, type });
+      // Hash has tokens — set session directly
+      if (accessToken && refreshToken) {
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
         if (!error) {
           router.replace('/');
           return;
         }
+        setStatus('Session error: ' + error.message);
+        setTimeout(() => router.replace('/login?error=auth'), 2000);
+        return;
       }
 
-      // Wait briefly for onAuthStateChange to fire
+      // Query param — token or code
+      const params = new URLSearchParams(window.location.search);
+      const token  = params.get('token_hash') || params.get('token');
+      const type   = params.get('type') as any;
+      const code   = params.get('code');
+
+      if (token && type) {
+        const { error } = await supabase.auth.verifyOtp({ token_hash: token, type });
+        if (!error) { router.replace('/'); return; }
+        setStatus('OTP error — requesting new session…');
+      }
+
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (!error) { router.replace('/'); return; }
+      }
+
+      // Last resort — wait for onAuthStateChange
+      setStatus('Waiting for session…');
       const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
         if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
           subscription.unsubscribe();
@@ -43,14 +69,10 @@ export default function AuthCallbackPage() {
         }
       });
 
-      // Timeout fallback — if nothing works after 5s, go to login
       setTimeout(() => {
+        subscription.unsubscribe();
         supabase.auth.getSession().then(({ data: { session } }) => {
-          if (session) {
-            router.replace('/');
-          } else {
-            router.replace('/login?error=auth');
-          }
+          router.replace(session ? '/' : '/login?error=auth');
         });
       }, 5000);
     };
@@ -65,7 +87,7 @@ export default function AuthCallbackPage() {
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
         </svg>
-        <p className="text-[13px] text-[#6b6860]">Signing you in…</p>
+        <p className="text-[13px] text-[#6b6860]">{status}</p>
       </div>
     </div>
   );
