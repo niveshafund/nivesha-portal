@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/hooks/useAuth';
+import { can } from '@/lib/rbac';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import Link from 'next/link';
@@ -82,6 +84,8 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   const [uploadForm, setUploadForm]   = useState<{ doc_type: DocType; notes: string }>({ doc_type: 'Other', notes: '' });
   const [uploadFile, setUploadFile]   = useState<File | null>(null);
   const [dragOver, setDragOver]       = useState(false);
+  const { role: rawRole } = useAuth();
+  const role = rawRole ?? undefined;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // New update form
@@ -1274,10 +1278,12 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
               <div className="text-[13.5px] font-semibold">Data Room</div>
               <div className="text-[11.5px] text-[#9b9890] mt-0.5">Documents, agreements, and files for this company</div>
             </div>
-            <button onClick={() => setShowUploadForm(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">
-              + Upload Document
-            </button>
+            {can.uploadDocument(role) && (
+              <button onClick={() => setShowUploadForm(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">
+                + Upload Document
+              </button>
+            )}
           </div>
 
           {/* Filter + Search bar */}
@@ -1296,7 +1302,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
           </div>
 
           {/* Upload form */}
-          {showUploadForm && (
+          {showUploadForm && can.uploadDocument(role) && (
             <div className="bg-white border border-[#e8e6df] rounded-xl p-5 mb-4">
               {/* Drag-and-drop / click-to-browse zone */}
               <div
@@ -1379,12 +1385,18 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[11.5px] text-[#9b9890]">{new Date(doc.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</td>
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] whitespace-nowrap">
                           <div className="flex gap-2">
-                            <button onClick={() => handleViewDoc(doc)}
-                              className="text-[11.5px] text-[#2d5be3] hover:underline">View</button>
-                            <button onClick={() => handleDownloadDoc(doc)}
-                              className="text-[11.5px] text-[#6b6860] hover:text-[#3d3b35] hover:underline">Download</button>
-                            <button onClick={() => handleDeleteDoc(doc)}
-                              className="text-[11.5px] text-red-500 hover:text-red-700">Delete</button>
+                            {can.viewDocument(role) && (
+                              <button onClick={() => handleViewDoc(doc)}
+                                className="text-[11.5px] text-[#2d5be3] hover:underline">View</button>
+                            )}
+                            {can.downloadDocument(role) && (
+                              <button onClick={() => handleDownloadDoc(doc)}
+                                className="text-[11.5px] text-[#6b6860] hover:text-[#3d3b35] hover:underline">Download</button>
+                            )}
+                            {can.deleteDocument(role) && (
+                              <button onClick={() => handleDeleteDoc(doc)}
+                                className="text-[11.5px] text-red-500 hover:text-red-700">Delete</button>
+                            )}
                           </div>
                         </td>
                       </tr>
