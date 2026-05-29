@@ -1,5 +1,5 @@
 'use client';
-// app/auth/callback/page.tsx  (replace route.ts with this page.tsx)
+// app/auth/callback/page.tsx
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -9,24 +9,53 @@ export default function AuthCallbackPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Supabase magic links put the token in the URL fragment (#) or query string
-    // onAuthStateChange fires automatically when Supabase detects the token
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        router.replace('/');
-      } else if (event === 'TOKEN_REFRESHED' && session) {
-        router.replace('/');
-      }
-    });
+    const handleCallback = async () => {
+      // Supabase puts tokens in the URL hash: #access_token=...&refresh_token=...
+      const hash = window.location.hash;
 
-    // Also try to get session directly in case it's already set
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        router.replace('/');
+      if (hash) {
+        // Let Supabase parse the hash and set the session
+        const { data, error } = await supabase.auth.getSession();
+        if (data.session) {
+          router.replace('/');
+          return;
+        }
       }
-    });
 
-    return () => subscription.unsubscribe();
+      // Also check query params (token_hash flow)
+      const params = new URLSearchParams(window.location.search);
+      const token_hash = params.get('token_hash') || params.get('token');
+      const type = params.get('type') as any;
+
+      if (token_hash && type) {
+        const { error } = await supabase.auth.verifyOtp({ token_hash, type });
+        if (!error) {
+          router.replace('/');
+          return;
+        }
+      }
+
+      // Wait briefly for onAuthStateChange to fire
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
+          subscription.unsubscribe();
+          router.replace('/');
+        }
+      });
+
+      // Timeout fallback — if nothing works after 5s, go to login
+      setTimeout(() => {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          if (session) {
+            router.replace('/');
+          } else {
+            router.replace('/login?error=auth');
+          }
+        });
+      }, 5000);
+    };
+
+    handleCallback();
   }, [router]);
 
   return (
