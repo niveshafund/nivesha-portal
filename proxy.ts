@@ -1,13 +1,21 @@
-// middleware.ts  (project root, next to package.json)
-// Redirects unauthenticated users to /login.
-// Redirects authenticated users away from /login to /.
-
+// proxy.ts (project root)
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export async function proxy(req: NextRequest) {
   const res = NextResponse.next();
+  const pathname = req.nextUrl.pathname;
+
+  // Always allow these through — no auth check
+  if (
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/auth/')  ||
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/favicon')
+  ) {
+    return res;
+  }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -26,27 +34,13 @@ export async function proxy(req: NextRequest) {
 
   const { data: { session } } = await supabase.auth.getSession();
 
-  const isLoginPage    = req.nextUrl.pathname.startsWith('/login');
-  const isAuthCallback = req.nextUrl.pathname.startsWith('/auth/callback');
-
-  // Always allow the auth callback through
-  if (isAuthCallback) return res;
-
-  // Not signed in → redirect to login
-  if (!session && !isLoginPage) {
+  if (!session) {
     return NextResponse.redirect(new URL('/login', req.url));
-  }
-
-  // Signed in + on login page → redirect to home
-  if (session && isLoginPage) {
-    return NextResponse.redirect(new URL('/', req.url));
   }
 
   return res;
 }
 
 export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|api/).*)',
-  ],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/).*)'],
 };
