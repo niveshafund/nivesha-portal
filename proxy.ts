@@ -1,43 +1,26 @@
 // proxy.ts (project root)
-import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export async function proxy(req: NextRequest) {
-  const res = NextResponse.next();
   const pathname = req.nextUrl.pathname;
 
-  // Always allow these through
-  if (
-    pathname.startsWith('/login') ||
-    pathname.startsWith('/auth/')
-  ) {
-    return res;
+  // Allow auth routes through
+  if (pathname.startsWith('/login') || pathname.startsWith('/auth/')) {
+    return NextResponse.next();
   }
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => req.cookies.getAll(),
-        setAll: (cookiesToSet) => {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            res.cookies.set(name, value, options);
-          });
-        },
-      },
-    }
+  // Check for Supabase session cookie
+  const cookies = req.cookies.getAll();
+  const sessionCookie = cookies.find(c => 
+    c.name.includes('auth-token') && !c.name.includes('code-verifier')
   );
 
-  // This refreshes the session and updates cookies
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
+  if (!sessionCookie) {
     return NextResponse.redirect(new URL('/login', req.url));
   }
 
-  return res;
+  return NextResponse.next();
 }
 
 export const config = {
