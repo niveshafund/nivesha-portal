@@ -9,6 +9,8 @@ export async function GET(request: NextRequest) {
   const code = requestUrl.searchParams.get('code');
   const next = requestUrl.searchParams.get('next') ?? '/';
 
+  const response = NextResponse.redirect(new URL(next, requestUrl.origin));
+
   if (code) {
     const cookieStore = await cookies();
 
@@ -21,6 +23,7 @@ export async function GET(request: NextRequest) {
           setAll: (cookiesToSet) => {
             cookiesToSet.forEach(({ name, value, options }) => {
               cookieStore.set(name, value, options);
+              response.cookies.set(name, value, options); // attach to response
             });
           },
         },
@@ -30,16 +33,16 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
-      return NextResponse.redirect(new URL(next, requestUrl.origin));
+      return response;
     }
 
-    // Server-side exchange failed — try client-side as fallback
+    console.error('Supabase exchange failed:', error.message);
     return NextResponse.redirect(
-      new URL(`/auth/confirm?code=${code}&next=${next}`, requestUrl.origin)
+      new URL(`/login?error=${encodeURIComponent(error.message)}`, requestUrl.origin)
     );
   }
 
   return NextResponse.redirect(
-    new URL('/login?error=auth', requestUrl.origin)
+    new URL('/login?error=no_code', requestUrl.origin)
   );
 }
