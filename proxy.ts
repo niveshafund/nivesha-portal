@@ -7,12 +7,10 @@ export async function proxy(req: NextRequest) {
   const res = NextResponse.next();
   const pathname = req.nextUrl.pathname;
 
-  // Always allow these through — no auth check
+  // Always allow these through
   if (
     pathname.startsWith('/login') ||
-    pathname.startsWith('/auth/')  ||
-    pathname.startsWith('/_next') ||
-    pathname.startsWith('/favicon')
+    pathname.startsWith('/auth/')
   ) {
     return res;
   }
@@ -35,6 +33,12 @@ export async function proxy(req: NextRequest) {
   const { data: { session } } = await supabase.auth.getSession();
 
   if (!session) {
+    // Check if there's a Supabase token in cookies at all
+    const hasSbCookie = req.cookies.getAll().some(c => c.name.startsWith('sb-'));
+    if (hasSbCookie) {
+      // Cookie exists but session not loaded yet — let it through
+      return res;
+    }
     return NextResponse.redirect(new URL('/login', req.url));
   }
 
