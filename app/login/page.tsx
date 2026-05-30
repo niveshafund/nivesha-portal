@@ -21,7 +21,9 @@ function LoginForm() {
 
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+      },
     });
 
     if (error) {
@@ -44,8 +46,7 @@ function LoginForm() {
           <p className="text-[11.5px] text-[#9b9890]">
             Click the link in the email to sign in. You can close this tab.
           </p>
-          <button
-            onClick={() => { setSent(false); setEmail(''); }}
+          <button onClick={() => { setSent(false); setEmail(''); }}
             className="mt-4 text-[12px] text-[#2d5be3] hover:underline">
             Use a different email
           </button>
@@ -58,7 +59,6 @@ function LoginForm() {
               Enter your work email and we'll send you a sign-in link.
             </p>
           </div>
-
           <form onSubmit={handleSubmit}>
             <div className="mb-4">
               <label className="block text-[11.5px] font-medium mb-1.5">Email address</label>
@@ -71,17 +71,13 @@ function LoginForm() {
                 className="w-full px-3 py-2.5 rounded-[8px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 transition-all"
               />
             </div>
-
-            {authError === 'auth' && (
-              <p className="text-[11.5px] text-red-500 mb-3">Sign-in link expired or already used. Please request a new one.</p>
+            {authError && (
+              <p className="text-[11.5px] text-red-500 mb-3">
+                {decodeURIComponent(authError)}
+              </p>
             )}
-            {error && (
-              <p className="text-[11.5px] text-red-500 mb-3">{error}</p>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading || !email.trim()}
+            {error && <p className="text-[11.5px] text-red-500 mb-3">{error}</p>}
+            <button type="submit" disabled={loading || !email.trim()}
               className="w-full py-2.5 rounded-[8px] bg-[#2d5be3] text-white text-[13px] font-medium hover:bg-[#2450cc] transition-colors disabled:opacity-60">
               {loading ? 'Sending…' : 'Send sign-in link'}
             </button>
@@ -96,7 +92,6 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-[#f5f4f0] flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-2">
             <div className="w-8 h-8 rounded-lg bg-[#2d5be3] flex items-center justify-center">
@@ -106,7 +101,6 @@ export default function LoginPage() {
           </div>
           <p className="text-[12.5px] text-[#9b9890]">Portfolio Management</p>
         </div>
-
         <Suspense fallback={
           <div className="bg-white border border-[#e8e6df] rounded-2xl p-7 shadow-sm flex items-center justify-center h-48">
             <svg className="animate-spin w-5 h-5 text-[#2d5be3]" viewBox="0 0 24 24" fill="none">
@@ -117,7 +111,6 @@ export default function LoginPage() {
         }>
           <LoginForm />
         </Suspense>
-
         <p className="text-center text-[11px] text-[#9b9890] mt-5">
           Access is by invitation only. Contact your GP if you need access.
         </p>
