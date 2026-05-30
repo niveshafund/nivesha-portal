@@ -9,12 +9,17 @@ export async function GET(request: NextRequest) {
   const code = requestUrl.searchParams.get('code');
   const next = requestUrl.searchParams.get('next') ?? '/';
 
-  console.log('[auth/callback] code:', code?.slice(0, 20));
-
   if (code) {
     const cookieStore = await cookies();
     const allCookies = cookieStore.getAll();
-    console.log('[auth/callback] cookies:', allCookies.map(c => c.name));
+    const hasVerifier = allCookies.some(c => c.name.includes('code-verifier'));
+
+    if (!hasVerifier) {
+      // No code verifier on server — redirect to client-side handler
+      return NextResponse.redirect(
+        new URL(`/auth/confirm?code=${code}&next=${next}`, requestUrl.origin)
+      );
+    }
 
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -31,23 +36,13 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-    console.log('[auth/callback] exchange result:', { 
-      user: data?.user?.email, 
-      error: error?.message 
-    });
-
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       return NextResponse.redirect(new URL(next, requestUrl.origin));
     }
-
-    // Redirect with specific error
-    return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent(error.message)}`, requestUrl.origin)
-    );
   }
 
   return NextResponse.redirect(
-    new URL('/login?error=no_code', requestUrl.origin)
+    new URL('/login?error=auth', requestUrl.origin)
   );
 }
