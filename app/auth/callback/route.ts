@@ -11,15 +11,6 @@ export async function GET(request: NextRequest) {
 
   if (code) {
     const cookieStore = await cookies();
-    const allCookies = cookieStore.getAll();
-    const hasVerifier = allCookies.some(c => c.name.includes('code-verifier'));
-
-    if (!hasVerifier) {
-      // No code verifier on server — redirect to client-side handler
-      return NextResponse.redirect(
-        new URL(`/auth/confirm?code=${code}&next=${next}`, requestUrl.origin)
-      );
-    }
 
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,9 +28,15 @@ export async function GET(request: NextRequest) {
     );
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
+
     if (!error) {
       return NextResponse.redirect(new URL(next, requestUrl.origin));
     }
+
+    // Server-side exchange failed — try client-side as fallback
+    return NextResponse.redirect(
+      new URL(`/auth/confirm?code=${code}&next=${next}`, requestUrl.origin)
+    );
   }
 
   return NextResponse.redirect(
