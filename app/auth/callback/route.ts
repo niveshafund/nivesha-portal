@@ -11,29 +11,24 @@ export async function GET(request: NextRequest) {
   const code = requestUrl.searchParams.get('code');
   const next = requestUrl.searchParams.get('next') ?? '/';
 
-  const response = NextResponse.redirect(new URL(next, requestUrl.origin));
-
   if (code) {
     const cookieStore = await cookies();
 
-    console.log('[callback] cookies received:', cookieStore.getAll().map(c => c.name));
-    console.log('[callback] code prefix:', code.slice(0, 10));
+    // 1. Initialize an array to track cookie mutations manually
+    const cookiesToWrite: Array<{ name: string; value: string; options: any }> = [];
 
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
-          getAll: () => {
-            const currentCookies = cookieStore.getAll();
-            console.log('[callback] getAll called, returning:', currentCookies.map(c => c.name));
-            return currentCookies;
-          },
+          getAll: () => cookieStore.getAll(),
           setAll: (cookiesToSet) => {
             cookiesToSet.forEach(({ name, value, options }) => {
-              const cookieOptions = { ...options, path: '/' };
-              cookieStore.set(name, value, cookieOptions);
-              response.cookies.set(name, value, cookieOptions);
+              // Store them securely for our response headers later
+              cookiesToWrite.push({ name, value, options });
+              // Mutate the active server cookie store context
+              cookieStore.set(name, value, { ...options, path: '/' });
             });
           },
         },
@@ -43,7 +38,15 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
-      console.log('[callback] success!');
+      // 2. NOW build the redirect object after the tokens have been extracted successfully
+      const response = NextResponse.redirect(new URL(next, requestUrl.origin));
+      
+      // 3. Inject the finalized auth cookies right into the outgoing header payload
+      cookiesToWrite.forEach(({ name, value, options }) => {
+        response.cookies.set(name, value, { ...options, path: '/' });
+      });
+
+      console.log('[callback] Handshake successful, redirecting to dashboard...');
       return response;
     }
 
