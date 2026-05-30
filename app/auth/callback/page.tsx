@@ -34,7 +34,7 @@ export default function AuthCallbackPage() {
       if (accessToken && refreshToken) {
         setStatus('Setting session from tokens…');
         const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
-        if (!error) { router.replace('/'); return; }
+        if (!error) { window.location.href = '/'; return; }
         setStatus('setSession error: ' + error.message);
         return;
       }
@@ -48,7 +48,7 @@ export default function AuthCallbackPage() {
       if (token && type) {
         setStatus(`Verifying OTP (type: ${type})…`);
         const { error } = await supabase.auth.verifyOtp({ token_hash: token, type });
-        if (!error) { router.replace('/'); return; }
+        if (!error) { window.location.href = '/'; return; }
         setStatus('verifyOtp error: ' + error.message);
         return;
       }
@@ -56,7 +56,7 @@ export default function AuthCallbackPage() {
       if (code) {
         setStatus('Exchanging code…');
         const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (!error) { router.replace('/'); return; }
+        if (!error) { window.location.href = '/'; return; }
         setStatus('exchangeCode error: ' + error.message);
         return;
       }
@@ -80,4 +80,3 @@ export default function AuthCallbackPage() {
     </div>
   );
 }
-// cache bust Fri May 29 16:16:08 PDT 2026
