@@ -85,6 +85,16 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   const [uploadFile, setUploadFile]   = useState<File | null>(null);
   const [dragOver, setDragOver]       = useState(false);
   const { role: rawRole } = useAuth();
+
+  // ── Confirm modal ─────────────────────────────────────────
+  const [confirmModal, setConfirmModal] = useState<{
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  function withConfirm(message: string, onConfirm: () => void) {
+    setConfirmModal({ message, onConfirm });
+  }
   const role = rawRole ?? undefined;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -196,7 +206,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   };
 
   const handleDeleteDoc = async (doc: CompanyDoc) => {
-    if (!confirm(`Delete "${doc.name}"?`)) return;
+    withConfirm(`Delete "${doc.name}"?`, async () => {
     await supabase.storage.from('company-documents').remove([doc.file_path]);
     await supabase.from('company_documents').delete().eq('id', doc.id);
     await loadDocs();
@@ -309,13 +319,14 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   };
 
   const handleDeleteTxn = async (txnId: string) => {
-    if (!confirm('Delete this transaction? This cannot be undone.')) return;
-    try {
-      await deleteTransaction(txnId);
-      setTxns(t => t.filter(x => x.id !== txnId));
-    } catch (err: any) {
-      alert('Failed to delete transaction: ' + err.message);
-    }
+    withConfirm('Delete this transaction? This cannot be undone.', async () => {
+      try {
+        await deleteTransaction(txnId);
+        setTxns(t => t.filter(x => x.id !== txnId));
+      } catch (err: any) {
+        alert('Failed to delete transaction: ' + err.message);
+      }
+    });
   };
 
   const handleSaveTxnEdit = async () => {
@@ -339,14 +350,15 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   };
 
   const handleDeleteVal = async (valId: string) => {
-    if (!confirm('Delete this valuation entry?')) return;
-    try {
-      const { supabase } = await import('@/lib/supabase');
-      await supabase.from('valuations').delete().eq('id', valId);
-      setVals(v => v.filter(x => x.id !== valId));
-    } catch (err: any) {
-      alert('Failed to delete valuation: ' + err.message);
-    }
+    withConfirm('Delete this valuation entry?', async () => {
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        await supabase.from('valuations').delete().eq('id', valId);
+        setVals(v => v.filter(x => x.id !== valId));
+      } catch (err: any) {
+        alert('Failed to delete valuation: ' + err.message);
+      }
+    });
   };
 
   const handleSaveValEdit = async () => {
@@ -484,13 +496,14 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   };
 
   const handleDeleteUpdate = async (updateId: string) => {
-    if (!confirm('Delete this update?')) return;
-    try {
-      await deleteCompanyUpdate(updateId);
-      setUpdates(u => u.filter(x => x.id !== updateId));
-    } catch (err: any) {
-      alert('Failed to delete: ' + err.message);
-    }
+    withConfirm('Delete this update?', async () => {
+      try {
+        await deleteCompanyUpdate(updateId);
+        setUpdates(u => u.filter(x => x.id !== updateId));
+      } catch (err: any) {
+        alert('Failed to delete: ' + err.message);
+      }
+    });
   };
 
   if (loading) return (
@@ -1526,6 +1539,29 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Confirm Modal ── */}
+      {confirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setConfirmModal(null)} />
+          <div className="relative bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
+            <div className="text-[14px] font-semibold mb-2">Are you sure?</div>
+            <p className="text-[13px] text-[#6b6860] mb-5">{confirmModal.message}</p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setConfirmModal(null)}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={() => { confirmModal.onConfirm(); setConfirmModal(null); }}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] font-medium bg-red-500 text-white hover:bg-red-600 transition-colors">
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
