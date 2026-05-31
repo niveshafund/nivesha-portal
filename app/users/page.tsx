@@ -129,18 +129,17 @@ export default function UsersPage() {
     if (!inviteForm.email.trim()) { setInviteError('Email is required'); return; }
     setInviting(true); setInviteError('');
     try {
-      await supabase.from('pending_invites').upsert({
-        email: inviteForm.email.trim().toLowerCase(),
-        full_name: inviteForm.full_name.trim() || null,
-        role: inviteForm.role,
-        invited_by: user?.id,
-      }, { onConflict: 'email' });
-
-      const { error } = await supabase.auth.signInWithOtp({
-        email: inviteForm.email.trim().toLowerCase(),
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      const res = await fetch('/api/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: inviteForm.email.trim().toLowerCase(),
+          full_name: inviteForm.full_name.trim() || null,
+          role: inviteForm.role,
+        }),
       });
-      if (error) throw error;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send invite');
 
       setSuccessMsg(`Invitation sent to ${inviteForm.email}`);
       setInviteForm({ email: '', full_name: '', role: 'Viewer' });
@@ -171,9 +170,10 @@ export default function UsersPage() {
   }
 
   async function handleResend(email: string) {
-    await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    await fetch('/api/invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, full_name: null, role: 'Viewer' }),
     });
     setSuccessMsg(`Magic link resent to ${email}`);
     setTimeout(() => setSuccessMsg(''), 4000);
