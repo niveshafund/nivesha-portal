@@ -55,6 +55,10 @@ type Form = {
   valuationType: 'Pre-money' | 'Post-money';
   safeType: string;
   discount: string;
+  sharePrice: string;
+  numShares: string;
+  interestRate: string;
+  maturityDate: string;
   investmentDate: string;
   headline: string;
   sector: string;
@@ -79,6 +83,10 @@ const empty: Form = {
   valuationType: 'Post-money',
   safeType: 'with valuation cap and discount',
   discount: '',
+  sharePrice: '',
+  numShares: '',
+  interestRate: '',
+  maturityDate: '',
   investmentDate: new Date().toISOString().split('T')[0],
   headline: '',
   sector: '',
@@ -93,6 +101,15 @@ function buildInvestmentTerms(form: any): string | undefined {
   if (form.securityType === 'SAFE') {
     if (form.safeType) parts.push(form.safeType);
     if (form.discount) parts.push(`${form.discount}% discount`);
+  }
+  if (form.securityType === 'Convertible Note') {
+    if (form.interestRate) parts.push(`${form.interestRate}% interest`);
+    if (form.maturityDate) parts.push(`matures ${form.maturityDate}`);
+    if (form.discount) parts.push(`${form.discount}% discount`);
+  }
+  if (form.securityType === 'Preferred Stock' || form.securityType === 'Common Stock') {
+    if (form.sharePrice) parts.push(`$${Number(form.sharePrice).toFixed(4)} per share`);
+    if (form.numShares) parts.push(`${Number(form.numShares).toLocaleString()} shares`);
   }
   if (form.valuation) {
     const val = Number(form.valuation);
@@ -342,6 +359,68 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
                 <p className="text-[11.5px] text-[#9b9890] mt-1">Discount applied at conversion (typically 15–20%)</p>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Convertible Note sub-section */}
+        {form.securityType === 'Convertible Note' && (
+          <div className="mb-5 pl-4 border-l-2 border-[#2d5be3]">
+            <p className="text-[13px] font-medium text-[#2d5be3] mb-3">Convertible Note Terms</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium mb-1">Interest Rate % <span className="text-[#9b9890] font-normal">(optional)</span></label>
+                <div className="relative">
+                  <input type="number" step="0.5" min="0" max="30" value={form.interestRate} onChange={set('interestRate')}
+                    placeholder="e.g., 6"
+                    className="w-full px-3 py-2.5 pr-7 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] font-sans outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 transition-colors" />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[13px]">%</span>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium mb-1">Maturity Date <span className="text-[#9b9890] font-normal">(optional)</span></label>
+                <input type="date" value={form.maturityDate} onChange={set('maturityDate')}
+                  className="w-full px-3 py-2.5 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] font-sans outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 transition-colors" />
+              </div>
+            </div>
+            <div className="max-w-xs mt-4">
+              <label className="block text-[13px] font-medium mb-1">Discount % <span className="text-[#9b9890] font-normal">(optional)</span></label>
+              <div className="relative">
+                <input type="number" step="0.5" min="0" max="50" value={form.discount} onChange={set('discount')}
+                  placeholder="e.g., 20"
+                  className="w-full px-3 py-2.5 pr-7 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] font-sans outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 transition-colors" />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[13px]">%</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Preferred Stock / Common Stock sub-section */}
+        {(form.securityType === 'Preferred Stock' || form.securityType === 'Common Stock') && (
+          <div className="mb-5 pl-4 border-l-2 border-[#2d5be3]">
+            <p className="text-[13px] font-medium text-[#2d5be3] mb-3">{form.securityType} Terms</p>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-[13px] font-medium mb-1">Share Price <span className="text-[#9b9890] font-normal">(optional)</span></label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[13px]">$</span>
+                  <input type="number" step="0.01" min="0" value={form.sharePrice} onChange={set('sharePrice')}
+                    placeholder="e.g., 1.33"
+                    className="w-full pl-6 pr-3 py-2.5 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] font-sans outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 transition-colors" />
+                </div>
+                <p className="text-[11.5px] text-[#9b9890] mt-1">Price per share</p>
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium mb-1">Number of Shares <span className="text-[#9b9890] font-normal">(optional)</span></label>
+                <input type="number" step="1" min="0" value={form.numShares} onChange={set('numShares')}
+                  placeholder="e.g., 150075"
+                  className="w-full px-3 py-2.5 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] font-sans outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 transition-colors" />
+                {form.sharePrice && form.numShares && Number(form.sharePrice) > 0 && Number(form.numShares) > 0 && (
+                  <p className="text-[11px] text-[#6b6860] mt-1">
+                    Total: ${(Number(form.sharePrice) * Number(form.numShares)).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

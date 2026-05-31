@@ -207,9 +207,10 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
 
   const handleDeleteDoc = async (doc: CompanyDoc) => {
     withConfirm(`Delete "${doc.name}"?`, async () => {
-    await supabase.storage.from('company-documents').remove([doc.file_path]);
-    await supabase.from('company_documents').delete().eq('id', doc.id);
-    await loadDocs();
+      await supabase.storage.from('company-documents').remove([doc.file_path]);
+      await supabase.from('company_documents').delete().eq('id', doc.id);
+      await loadDocs();
+    });
   };
 
   const handleViewDoc = async (doc: CompanyDoc) => {
