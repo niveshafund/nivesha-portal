@@ -18,6 +18,9 @@ export async function GET(request: NextRequest) {
   redirectTo.searchParams.delete('token_hash');
   redirectTo.searchParams.delete('type');
 
+  // 1. Pre-build the redirect target container object layout
+  const response = NextResponse.redirect(redirectTo);
+
   if (token_hash && type) {
     const cookieStore = await cookies();
 
@@ -31,22 +34,25 @@ export async function GET(request: NextRequest) {
           },
           setAll(cookiesToSet) {
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, { ...options, path: '/' });
+              const cookieOptions = { ...options, path: '/' };
+              // ✅ FIX: Simultaneously synchronize keys to both Next.js internals AND the active outgoing redirect response headers
+              cookieStore.set(name, value, cookieOptions);
+              response.cookies.set(name, value, cookieOptions);
             });
           },
         },
       }
     );
 
-    // ✅ Uses verifyOtp instead of exchangeCodeForSession. 
-    // This requires zero client-side pre-existing state cookies!
+    // Uses verifyOtp via token_hash parameters directly from the URL payload
     const { error } = await supabase.auth.verifyOtp({
       type,
       token_hash,
     });
 
     if (!error) {
-      return NextResponse.redirect(redirectTo);
+      // ✅ SUCCESS: Returns the response object that now carries your active auth cookies
+      return response;
     }
     
     console.error('[confirm error]:', error.message);
