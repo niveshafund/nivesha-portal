@@ -18,11 +18,13 @@ function LoginForm() {
     if (!email.trim()) return;
     setLoading(true);
     setError('');
-
+    // 1. Get the domain (e.g., https://portal.niveshaventures.com)
+    const baseUrl = window.location.origin;
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+       // 2. Explicitly point to the /auth/confirm path
+        emailRedirectTo: `${baseUrl}/auth/confirm`,
       },
     });
 
