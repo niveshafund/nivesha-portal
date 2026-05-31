@@ -1,7 +1,9 @@
 'use client';
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/lib/supabase';
 
 const mainNav = [
   { href: '/dashboard',       label: 'Dashboard',          icon: 'grid' },
@@ -32,6 +34,23 @@ const icons: Record<string, React.ReactElement> = {
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, fullName, role } = useAuth();
+  const [showLogout, setShowLogout] = useState(false);
+
+  // Derive initials from name or email
+  const displayName = fullName || user?.email?.split('@')[0] || 'User';
+  const initials = displayName
+    .split(' ')
+    .map((w: string) => w[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.replace('/login');
+  }
 
   const NavItem = ({ href, label, icon }: { href: string; label: string; icon: string }) => {
     const active = pathname === href || pathname.startsWith(href + '/');
@@ -82,14 +101,31 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="mt-auto px-[18px] py-3 border-t border-[#e8e6df] flex items-center gap-2.5">
-        <div className="w-[29px] h-[29px] bg-[#2d5be3] rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
-          KM
-        </div>
-        <div>
-          <div className="text-xs font-medium">Kishore Mokada</div>
-          <div className="text-[10.5px] text-[#9b9890]">GP · Enterprise Plan</div>
-        </div>
+      <div className="mt-auto border-t border-[#e8e6df]">
+        {showLogout && (
+          <div className="px-[18px] py-2 border-b border-[#e8e6df]">
+            <button
+              onClick={handleLogout}
+              className="w-full text-left text-[12px] text-red-500 hover:text-red-700 py-1 transition-colors">
+              Sign out
+            </button>
+          </div>
+        )}
+        <button
+          onClick={() => setShowLogout(v => !v)}
+          className="w-full px-[18px] py-3 flex items-center gap-2.5 hover:bg-[#f9f8f5] transition-colors text-left">
+          <div className="w-[29px] h-[29px] bg-[#2d5be3] rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+            {initials}
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-medium truncate">{displayName}</div>
+            <div className="text-[10.5px] text-[#9b9890]">{role ?? 'Loading…'}</div>
+          </div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+            className={`w-3 h-3 text-[#9b9890] ml-auto flex-shrink-0 transition-transform ${showLogout ? 'rotate-180' : ''}`}>
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
       </div>
     </aside>
   );
