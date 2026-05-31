@@ -98,7 +98,8 @@ function ActionsMenu({
 }
 
 export default function UsersPage() {
-  const { role, user } = useAuth();
+  const { role: rawRole, user } = useAuth();
+  const role = rawRole ?? undefined;
   const [members, setMembers]         = useState<TeamMember[]>([]);
   const [invites, setInvites]         = useState<PendingInvite[]>([]);
   const [loading, setLoading]         = useState(true);
