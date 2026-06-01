@@ -23,6 +23,16 @@ type Contact = {
   phone?: string;
   notes?: string;
   created_at: string;
+  isPrimary?: boolean; // derived from company/LP record
+};
+
+type DbCompanyRaw = {
+  id: string; fund_id: string; name: string;
+  contact_name?: string; contact_email?: string; contact_phone?: string;
+};
+type DbLPRaw = {
+  id: string; fund_id: string; name: string;
+  email?: string; phone?: string;
 };
 
 type Tab = 'company' | 'lp';
@@ -50,8 +60,8 @@ export default function ContactsPage() {
   const [deleteContact, setDeleteContact] = useState<Contact | null>(null);
 
   // Company/LP options for the add form
-  const [companies, setCompanies]   = useState<{id: string; name: string; fund_id: string}[]>([]);
-  const [lps, setLps]               = useState<{id: string; name: string; fund_id: string}[]>([]);
+  const [companies, setCompanies]   = useState<DbCompanyRaw[]>([]);
+  const [lps, setLps]               = useState<DbLPRaw[]>([]);
 
   const [form, setForm] = useState({
     fund_id: '', entity_id: '', first_name: '', last_name: '',
@@ -67,13 +77,56 @@ export default function ContactsPage() {
     const [{ data: fundsData }, { data: contactsData }, { data: companiesData }, { data: lpsData }] = await Promise.all([
       supabase.from('funds').select('id, name').order('name'),
       supabase.from('contacts').select('*').order('created_at', { ascending: false }),
-      supabase.from('companies').select('id, name, fund_id').order('name'),
-      supabase.from('lps').select('id, name, fund_id').order('name'),
+      supabase.from('companies').select('id, name, fund_id, contact_name, contact_email, contact_phone').order('name'),
+      supabase.from('lps').select('id, name, fund_id, email, phone').order('name'),
     ]);
+
     setFunds(fundsData ?? []);
-    setContacts((contactsData ?? []) as Contact[]);
-    setCompanies(companiesData ?? []);
-    setLps(lpsData ?? []);
+    setCompanies((companiesData ?? []) as DbCompanyRaw[]);
+    setLps((lpsData ?? []) as DbLPRaw[]);
+
+    // Build primary contacts derived from companies
+    const primaryCompanyContacts: Contact[] = ((companiesData ?? []) as DbCompanyRaw[])
+      .filter(c => c.contact_name)
+      .map(c => {
+        const nameParts = (c.contact_name ?? '').trim().split(' ');
+        return {
+          id: `primary-company-${c.id}`,
+          fund_id: c.fund_id,
+          contact_type: 'company' as const,
+          company_id: c.id,
+          company_name: c.name,
+          first_name: nameParts[0] ?? '',
+          last_name: nameParts.slice(1).join(' ') ?? '',
+          title: 'Primary Contact',
+          email: c.contact_email,
+          phone: c.contact_phone,
+          created_at: new Date(0).toISOString(),
+          isPrimary: true,
+        };
+      });
+
+    // Build primary contacts derived from LPs
+    const primaryLPContacts: Contact[] = ((lpsData ?? []) as DbLPRaw[])
+      .filter(l => l.email || l.phone)
+      .map(l => ({
+        id: `primary-lp-${l.id}`,
+        fund_id: l.fund_id,
+        contact_type: 'lp' as const,
+        lp_id: l.id,
+        lp_name: l.name,
+        first_name: l.name,
+        last_name: '',
+        title: 'Primary Contact',
+        email: l.email,
+        phone: l.phone,
+        created_at: new Date(0).toISOString(),
+        isPrimary: true,
+      }));
+
+    // Merge: primary contacts first, then additional contacts from contacts table
+    const additional = (contactsData ?? []) as Contact[];
+    setContacts([...primaryCompanyContacts, ...primaryLPContacts, ...additional]);
     setLoading(false);
   }
 
@@ -401,12 +454,14 @@ export default function ContactsPage() {
                       </>
                     )}
                     <td className="px-4 py-3">
-                      {canWrite && (
+                      {c.isPrimary ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10.5px] bg-[#f0efe9] text-[#9b9890]">from record</span>
+                      ) : canWrite ? (
                         <div className="flex gap-3">
                           <button onClick={() => openEdit(c)} className="text-[11.5px] text-[#2d5be3] hover:underline">Edit</button>
                           <button onClick={() => setDeleteContact(c)} className="text-[11.5px] text-red-500 hover:underline">Delete</button>
                         </div>
-                      )}
+                      ) : null}
                     </td>
                   </tr>
                 ))}
