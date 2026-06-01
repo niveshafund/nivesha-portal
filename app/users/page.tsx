@@ -1,7 +1,8 @@
 'use client';
 // app/users/page.tsx
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import { can, ALL_ROLES, ROLE_META, AppRole } from '@/lib/rbac';
@@ -34,30 +35,35 @@ function ActionsMenu({
   onResend: () => void; onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: 0, right: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     function handle(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (btnRef.current && !btnRef.current.closest('[data-menu]')?.contains(e.target as Node)) {
+        setOpen(false);
+      }
     }
     document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
   }, []);
 
+  function handleOpen() {
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setPos({ top: rect.bottom + window.scrollY + 4, right: window.innerWidth - rect.right });
+    }
+    setOpen(v => !v);
+  }
+
   if (!canManage || isSelf) return (
     <span className="text-[11.5px] text-[#9b9890]">{isSelf ? 'You' : ''}</span>
   );
 
-  return (
-    <div className="relative" ref={ref}>
-      <button onClick={() => setOpen(v => !v)}
-        className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[#f0efe9] transition-colors text-[#6b6860]">
-        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-          <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
-        </svg>
-      </button>
-      {open && (
-        <div className="absolute right-0 top-9 bg-white border border-[#e8e6df] rounded-xl shadow-lg py-1 z-20 w-48">
+  const menu = open && (
+    <div data-menu
+      style={{ position: 'absolute', top: pos.top, right: pos.right, zIndex: 9999 }}
+      className="bg-white border border-[#e8e6df] rounded-xl shadow-xl py-1 w-48">
           <div className="px-3 py-1.5 text-[10.5px] font-semibold text-[#9b9890] uppercase tracking-wide">Actions</div>
           <button onClick={() => { onChangeRole(); setOpen(false); }}
             className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-[#1a1915] hover:bg-[#f9f8f5] transition-colors">
@@ -91,8 +97,18 @@ function ActionsMenu({
             </svg>
             Delete user
           </button>
-        </div>
-      )}
+    </div>
+  );
+
+  return (
+    <div data-menu className="relative">
+      <button ref={btnRef} onClick={handleOpen}
+        className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[#f0efe9] transition-colors text-[#6b6860]">
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+          <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
+        </svg>
+      </button>
+      {typeof window !== 'undefined' && open && createPortal(menu, document.body)}
     </div>
   );
 }
