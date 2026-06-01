@@ -4,6 +4,7 @@
 
 export type AppRole =
   | 'GP'
+  | 'LP'  
   | 'Associate'
   | 'Analyst'
   | 'Finance'
@@ -54,6 +55,11 @@ export const ROLE_META: Record<AppRole, { label: string; description: string; co
     label: 'GP',
     description: 'Full access — create funds, approve investments, manage team',
     color: 'bg-purple-100 text-purple-800',
+  },
+  'LP': {
+    label: 'LP',
+    description: 'Limited Partner — read-only access to own investment data',
+    color: 'bg-indigo-100 text-indigo-800',
   },
   'Associate': {
     label: 'Associate',
