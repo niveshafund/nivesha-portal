@@ -23,21 +23,61 @@ type Contact = {
   phone?: string;
   notes?: string;
   created_at: string;
-  isPrimary?: boolean; // derived from company/LP record
-};
-
-type DbCompanyRaw = {
-  id: string; fund_id: string; name: string;
-  contact_name?: string; contact_email?: string; contact_phone?: string;
-};
-type DbLPRaw = {
-  id: string; fund_id: string; name: string;
-  email?: string; phone?: string;
+  isPrimary?: boolean;
 };
 
 type Tab = 'company' | 'lp';
 
 const inputCls = 'w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 bg-white';
+
+function RowActionsMenu({ isPrimary, onEdit, onDelete }: {
+  isPrimary?: boolean; onEdit: () => void; onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, []);
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen(v => !v)}
+        className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-[#f0efe9] transition-colors text-[#6b6860]">
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+          <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-8 bg-white border border-[#e8e6df] rounded-xl shadow-lg py-1 z-20 w-40">
+          {isPrimary && (
+            <div className="px-3 py-1.5 text-[10.5px] text-[#9b9890]">from company record</div>
+          )}
+          <button onClick={() => { onEdit(); setOpen(false); }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-[#1a1915] hover:bg-[#f9f8f5]">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5 text-[#6b6860]">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+            Edit
+          </button>
+          {!isPrimary && (
+            <button onClick={() => { onDelete(); setOpen(false); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-red-500 hover:bg-red-50">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+                <path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/>
+              </svg>
+              Delete
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ContactsPage() {
   const { role } = useAuth();
@@ -60,8 +100,8 @@ export default function ContactsPage() {
   const [deleteContact, setDeleteContact] = useState<Contact | null>(null);
 
   // Company/LP options for the add form
-  const [companies, setCompanies]   = useState<DbCompanyRaw[]>([]);
-  const [lps, setLps]               = useState<DbLPRaw[]>([]);
+  const [companies, setCompanies]   = useState<{id: string; name: string; fund_id: string}[]>([]);
+  const [lps, setLps]               = useState<{id: string; name: string; fund_id: string}[]>([]);
 
   const [form, setForm] = useState({
     fund_id: '', entity_id: '', first_name: '', last_name: '',
@@ -80,34 +120,34 @@ export default function ContactsPage() {
       supabase.from('companies').select('id, name, fund_id, contact_name, contact_email, contact_phone').order('name'),
       supabase.from('lps').select('id, name, fund_id, email, phone').order('name'),
     ]);
-
     setFunds(fundsData ?? []);
-    setCompanies((companiesData ?? []) as DbCompanyRaw[]);
-    setLps((lpsData ?? []) as DbLPRaw[]);
+    setCompanies((companiesData ?? []) as any[]);
+    setLps((lpsData ?? []) as any[]);
 
-    // Build primary contacts derived from companies
-    const primaryCompanyContacts: Contact[] = ((companiesData ?? []) as DbCompanyRaw[])
+    // Auto-populate primary contacts from company records
+    const primaryCompany: Contact[] = ((companiesData ?? []) as any[])
       .filter(c => c.contact_name)
       .map(c => {
-        const nameParts = (c.contact_name ?? '').trim().split(' ');
+        const parts = (c.contact_name ?? '').trim().split(' ');
         return {
           id: `primary-company-${c.id}`,
           fund_id: c.fund_id,
           contact_type: 'company' as const,
           company_id: c.id,
           company_name: c.name,
-          first_name: nameParts[0] ?? '',
-          last_name: nameParts.slice(1).join(' ') ?? '',
-          title: 'Primary Contact',
+          first_name: parts[0] ?? '',
+          last_name: parts.slice(1).join(' '),
+          title: undefined,
           email: c.contact_email,
           phone: c.contact_phone,
+          notes: 'Primary Contact',
           created_at: new Date(0).toISOString(),
           isPrimary: true,
         };
       });
 
-    // Build primary contacts derived from LPs
-    const primaryLPContacts: Contact[] = ((lpsData ?? []) as DbLPRaw[])
+    // Auto-populate primary contacts from LP records
+    const primaryLP: Contact[] = ((lpsData ?? []) as any[])
       .filter(l => l.email || l.phone)
       .map(l => ({
         id: `primary-lp-${l.id}`,
@@ -117,16 +157,16 @@ export default function ContactsPage() {
         lp_name: l.name,
         first_name: l.name,
         last_name: '',
-        title: 'Primary Contact',
+        title: undefined,
         email: l.email,
         phone: l.phone,
+        notes: undefined,
         created_at: new Date(0).toISOString(),
         isPrimary: true,
       }));
 
-    // Merge: primary contacts first, then additional contacts from contacts table
     const additional = (contactsData ?? []) as Contact[];
-    setContacts([...primaryCompanyContacts, ...primaryLPContacts, ...additional]);
+    setContacts([...primaryCompany, ...primaryLP, ...additional]);
     setLoading(false);
   }
 
@@ -418,8 +458,8 @@ export default function ContactsPage() {
               <thead>
                 <tr className="border-b border-[#e8e6df] bg-[#fafaf8]">
                   {(tab === 'company'
-                    ? ['Company', 'First Name', 'Last Name', 'Email', 'Phone', 'Title', 'Notes', 'Actions']
-                    : ['Fund', 'LP / Firm', 'First Name', 'Last Name', 'Email', 'Phone', 'Title', 'Actions']
+                    ? ['Company', 'Name', 'Email', 'Phone', 'Title', 'Notes', 'Actions']
+                    : ['Name', 'Email', 'Phone', 'Notes', 'Actions']
                   ).map(h => (
                     <th key={h} className="text-left text-[11px] font-semibold text-[#9b9890] tracking-wide px-4 py-3">{h}</th>
                   ))}
@@ -431,8 +471,7 @@ export default function ContactsPage() {
                     {tab === 'company' ? (
                       <>
                         <td className="px-4 py-3 text-[13px] font-medium">{c.company_name ?? '—'}</td>
-                        <td className="px-4 py-3 text-[13px]">{c.first_name}</td>
-                        <td className="px-4 py-3 text-[13px]">{c.last_name}</td>
+                        <td className="px-4 py-3 text-[13px]">{[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}</td>
                         <td className="px-4 py-3 text-[13px] text-[#2d5be3]">
                           {c.email ? <a href={`mailto:${c.email}`} className="hover:underline">{c.email}</a> : '—'}
                         </td>
@@ -442,26 +481,22 @@ export default function ContactsPage() {
                       </>
                     ) : (
                       <>
-                        <td className="px-4 py-3 text-[13px]">{funds.find(f => f.id === c.fund_id)?.name ?? '—'}</td>
-                        <td className="px-4 py-3 text-[13px] font-medium">{c.lp_name ?? '—'}</td>
-                        <td className="px-4 py-3 text-[13px]">{c.first_name}</td>
-                        <td className="px-4 py-3 text-[13px]">{c.last_name}</td>
+                        <td className="px-4 py-3 text-[13px] font-medium">{c.first_name || c.lp_name || '—'}</td>
                         <td className="px-4 py-3 text-[13px] text-[#2d5be3]">
                           {c.email ? <a href={`mailto:${c.email}`} className="hover:underline">{c.email}</a> : '—'}
                         </td>
                         <td className="px-4 py-3 text-[13px]">{c.phone ?? '—'}</td>
-                        <td className="px-4 py-3 text-[13px] text-[#6b6860]">{c.title ?? '—'}</td>
+                        <td className="px-4 py-3 text-[12px] text-[#9b9890] max-w-[150px] truncate">{c.notes ?? '—'}</td>
                       </>
                     )}
                     <td className="px-4 py-3">
-                      {c.isPrimary ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10.5px] bg-[#f0efe9] text-[#9b9890]">from record</span>
-                      ) : canWrite ? (
-                        <div className="flex gap-3">
-                          <button onClick={() => openEdit(c)} className="text-[11.5px] text-[#2d5be3] hover:underline">Edit</button>
-                          <button onClick={() => setDeleteContact(c)} className="text-[11.5px] text-red-500 hover:underline">Delete</button>
-                        </div>
-                      ) : null}
+                      {canWrite && (
+                        <RowActionsMenu
+                          isPrimary={c.isPrimary}
+                          onEdit={() => openEdit(c)}
+                          onDelete={() => setDeleteContact(c)}
+                        />
+                      )}
                     </td>
                   </tr>
                 ))}
