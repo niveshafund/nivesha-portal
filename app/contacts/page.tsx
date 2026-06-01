@@ -155,7 +155,7 @@ export default function ContactsPage() {
           company_name: c.name,
           first_name: parts[0] ?? '',
           last_name: parts.slice(1).join(' '),
-          title: undefined,
+          title: 'CEO',
           email: c.contact_email,
           phone: c.contact_phone,
           notes: 'Primary Contact',
@@ -225,7 +225,7 @@ export default function ContactsPage() {
         ...entityField,
       };
 
-      if (editContact) {
+      if (editContact && !editContact.isPrimary) {
         await supabase.from('contacts').update(payload as any).eq('id', editContact.id);
       } else {
         await supabase.from('contacts').insert(payload as any);

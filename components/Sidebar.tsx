@@ -8,9 +8,9 @@ import { supabase } from '@/lib/supabase';
 const mainNav = [
   { href: '/dashboard',       label: 'Dashboard',          icon: 'grid' },
   { href: '/funds',           label: 'Funds',              icon: 'briefcase' },
-  { href: '/metrics',         label: 'Metrics Data',       icon: 'bar-chart' },
-  { href: '/analytics',       label: 'Analytics',          icon: 'globe' },
-  { href: '/reports',         label: 'Reports',            icon: 'file-text' },
+  { href: '/metrics',         label: 'Metrics Data',       icon: 'bar-chart',  disabled: true },
+  { href: '/analytics',       label: 'Analytics',          icon: 'globe',      disabled: true },
+  { href: '/reports',         label: 'Reports',            icon: 'file-text',  disabled: true },
 ];
 
 const adminNav = [
@@ -71,8 +71,17 @@ export default function Sidebar() {
     }
   }
 
-  const NavItem = ({ href, label, icon }: { href: string; label: string; icon: string }) => {
+  const NavItem = ({ href, label, icon, disabled }: { href: string; label: string; icon: string; disabled?: boolean }) => {
     const active = pathname === href || pathname.startsWith(href + '/');
+    if (disabled) {
+      return (
+        <div className="flex items-center gap-2.5 px-[18px] py-[7px] text-[13px] border-l-[3px] border-transparent text-[#c4c2bb] cursor-not-allowed select-none">
+          <span className="opacity-40">{icons[icon]}</span>
+          {label}
+          <span className="ml-auto text-[9px] font-medium bg-[#f0efe9] text-[#9b9890] px-1.5 py-0.5 rounded">Soon</span>
+        </div>
+      );
+    }
     return (
       <Link href={href}
         className={`flex items-center gap-2.5 px-[18px] py-[7px] text-[13px] border-l-[3px] transition-all duration-100 ${
