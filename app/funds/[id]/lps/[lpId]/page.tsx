@@ -375,9 +375,9 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
                     <select
                       value={form.state}
                       onChange={set('state')}
-                      className={inputCls + ' flex-1'}
+                      className={inputCls + ' w-[160px] min-w-[160px]'}
                     >
-                      <option value="">— Select state —</option>
+                      <option value="">— State —</option>
                       {US_STATES.map(s => (
                         <option key={s} value={s}>{s}</option>
                       ))}
@@ -394,7 +394,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
                     value={form.zip}
                     onChange={set('zip')}
                     placeholder="ZIP"
-                    className={inputCls + ' w-24'}
+                    className={inputCls + ' w-28'}
                   />
                 </div>
               </div>
