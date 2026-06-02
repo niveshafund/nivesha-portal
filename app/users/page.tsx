@@ -11,6 +11,7 @@ type TeamMember = {
   id: string;
   user_id: string;
   full_name: string | null;
+  email: string | null;
   role: AppRole;
   is_active: boolean;
   created_at: string;
@@ -37,16 +38,20 @@ function ActionsMenu({
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, right: 0 });
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handle(e: MouseEvent) {
-      if (btnRef.current && !btnRef.current.closest('[data-menu]')?.contains(e.target as Node)) {
+      if (
+        btnRef.current && !btnRef.current.contains(e.target as Node) &&
+        menuRef.current && !menuRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     }
-    document.addEventListener('mousedown', handle);
+    if (open) document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
-  }, []);
+  }, [open]);
 
   function handleOpen() {
     if (btnRef.current) {
@@ -61,47 +66,48 @@ function ActionsMenu({
   );
 
   const menu = open && (
-    <div data-menu
+    <div
+      ref={menuRef}
       style={{ position: 'absolute', top: pos.top, right: pos.right, zIndex: 9999 }}
-      className="bg-white border border-[#e8e6df] rounded-xl shadow-xl py-1 w-48">
-          <div className="px-3 py-1.5 text-[10.5px] font-semibold text-[#9b9890] uppercase tracking-wide">Actions</div>
-          <button onClick={() => { onChangeRole(); setOpen(false); }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-[#1a1915] hover:bg-[#f9f8f5] transition-colors">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-[#6b6860]">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-            </svg>
-            Edit user
-          </button>
-          <button onClick={() => { onResend(); setOpen(false); }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-[#1a1915] hover:bg-[#f9f8f5] transition-colors">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-[#6b6860]">
-              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-              <polyline points="22,6 12,13 2,6"/>
-            </svg>
-            Resend invitation
-          </button>
-          <button onClick={() => { onDeactivate(); setOpen(false); }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-[#1a1915] hover:bg-[#f9f8f5] transition-colors">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-[#6b6860]">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            </svg>
-            {member.is_active ? 'Deactivate user' : 'Reactivate user'}
-          </button>
-          <div className="border-t border-[#e8e6df] my-1"/>
-          <button onClick={() => { onDelete(); setOpen(false); }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-red-500 hover:bg-red-50 transition-colors">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
-              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
-              <path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/>
-            </svg>
-            Delete user
-          </button>
+      className="bg-white border border-[#e8e6df] rounded-xl shadow-xl py-1 w-52">
+      <div className="px-3 py-1.5 text-[10.5px] font-semibold text-[#9b9890] uppercase tracking-wide">Actions</div>
+      <button onClick={() => { setOpen(false); setTimeout(onChangeRole, 10); }}
+        className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-[#1a1915] hover:bg-[#f9f8f5] transition-colors">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-[#6b6860]">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+        Edit user
+      </button>
+      <button onClick={() => { setOpen(false); setTimeout(onResend, 10); }}
+        className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-[#1a1915] hover:bg-[#f9f8f5] transition-colors">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-[#6b6860]">
+          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+          <polyline points="22,6 12,13 2,6"/>
+        </svg>
+        Resend invitation
+      </button>
+      <button onClick={() => { setOpen(false); setTimeout(onDeactivate, 10); }}
+        className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-[#1a1915] hover:bg-[#f9f8f5] transition-colors">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-[#6b6860]">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        {member.is_active ? 'Deactivate user' : 'Reactivate user'}
+      </button>
+      <div className="border-t border-[#e8e6df] my-1"/>
+      <button onClick={() => { setOpen(false); setTimeout(onDelete, 10); }}
+        className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-red-500 hover:bg-red-50 transition-colors">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+          <path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/>
+        </svg>
+        Delete user
+      </button>
     </div>
   );
 
   return (
-    <div data-menu className="relative">
+    <div className="relative inline-flex justify-end">
       <button ref={btnRef} onClick={handleOpen}
         className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[#f0efe9] transition-colors text-[#6b6860]">
         <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
@@ -136,7 +142,21 @@ export default function UsersPage() {
       supabase.from('user_roles').select('*').order('created_at', { ascending: true }),
       supabase.from('pending_invites').select('*').is('accepted_at', null).order('created_at', { ascending: false }),
     ]);
-    setMembers((roles ?? []) as TeamMember[]);
+
+    // Enrich members with email from auth.users via RPC or admin — fall back to pending_invites email match
+    const inviteEmailMap: Record<string, string> = {};
+    (inv ?? []).forEach((i: any) => { if (i.email) inviteEmailMap[i.email] = i.email; });
+
+    // Try to get emails from pending_invites by matching user_id if available
+    const enriched = (roles ?? []).map((r: any) => {
+      // Check if there's a pending invite with matching email
+      const matchedInvite = (inv ?? []).find((i: any) =>
+        i.full_name === r.full_name && i.role === r.role
+      );
+      return { ...r, email: matchedInvite?.email ?? r.email ?? null };
+    });
+
+    setMembers(enriched as TeamMember[]);
     setInvites((inv ?? []) as PendingInvite[]);
     setLoading(false);
   }
@@ -186,13 +206,18 @@ export default function UsersPage() {
   }
 
   async function handleResend(email: string) {
-    await fetch('/api/invite', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, full_name: null, role: 'Viewer' }),
-    });
-    setSuccessMsg(`Magic link resent to ${email}`);
-    setTimeout(() => setSuccessMsg(''), 4000);
+    if (!email) { setSuccessMsg('No email found for this user — they may need to be re-invited manually.'); setTimeout(() => setSuccessMsg(''), 5000); return; }
+    try {
+      const res = await fetch('/api/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, full_name: null, role: 'Viewer' }),
+      });
+      if (res.ok) {
+        setSuccessMsg(`Magic link resent to ${email}`);
+        setTimeout(() => setSuccessMsg(''), 4000);
+      }
+    } catch {}
   }
 
   async function handleRevokeInvite(id: string) {
@@ -295,7 +320,7 @@ export default function UsersPage() {
           <thead>
             <tr className="border-b border-[#e8e6df]">
               {['USER','ROLE','STATUS','ACTIONS'].map(h => (
-                <th key={h} className={`text-left text-[10.5px] font-semibold text-[#9b9890] tracking-wide px-6 py-3 ${h === 'ACTIONS' ? 'text-right' : ''}`}>{h}</th>
+                <th key={h} className="text-left text-[10.5px] font-semibold text-[#9b9890] tracking-wide px-6 py-3">{h}</th>
               ))}
             </tr>
           </thead>
@@ -344,14 +369,14 @@ export default function UsersPage() {
                     {m.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
-                <td className="px-6 py-4 text-right">
+                <td className="px-6 py-4">
                   <ActionsMenu
                     member={m}
                     isSelf={m.user_id === user?.id}
                     canManage={!!can.manageTeam(role)}
                     onChangeRole={() => { setEditingId(m.id); setEditRole(m.role); }}
                     onDeactivate={() => handleDeactivate(m)}
-                    onResend={() => handleResend(m.full_name ?? '')}
+                    onResend={() => handleResend(m.email ?? '')}
                     onDelete={() => setConfirmDelete(m)}
                   />
                 </td>
