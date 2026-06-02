@@ -53,6 +53,89 @@ function BridgeRow({ label, value, color, bold }: { label: string; value: string
   );
 }
 
+// ─── Zero-state: LP account exists in auth but no LP record yet ──
+function PendingSetupScreen({ email, onSignOut }: { email: string; onSignOut: () => void }) {
+  return (
+    <div className="min-h-screen bg-[#f5f4f0]">
+      {/* Header */}
+      <header className="bg-white border-b border-[#eaeaea]">
+        <div className="max-w-6xl mx-auto px-6 h-[64px] flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-[#2d5be3] flex items-center justify-center flex-shrink-0">
+            <span className="text-white text-[13px] font-bold">N</span>
+          </div>
+          <div className="text-[14px] font-semibold text-[#1a1915]">Investor Portal</div>
+          <div className="ml-auto">
+            <button
+              onClick={onSignOut}
+              className="text-[12.5px] text-[#9b9890] hover:text-[#1a1915] transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-6 py-16">
+        {/* Zero-state card */}
+        <div className="max-w-lg mx-auto bg-white rounded-2xl border border-[#eaeaea] p-10 text-center">
+          <div className="w-14 h-14 rounded-full bg-[#eef2fd] flex items-center justify-center mx-auto mb-5">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#2d5be3" strokeWidth={1.5} className="w-7 h-7">
+              <rect x="2" y="7" width="20" height="14" rx="2"/>
+              <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+              <line x1="12" y1="12" x2="12" y2="16"/>
+              <circle cx="12" cy="17" r="0.5" fill="#2d5be3"/>
+            </svg>
+          </div>
+
+          <h2 className="text-[20px] font-bold text-[#1a1915] mb-2">Account setup in progress</h2>
+          <p className="text-[13.5px] text-[#6b6860] mb-6 leading-relaxed">
+            Your investor account has been created but your fund data hasn't been linked yet.
+            Your fund manager will complete your setup shortly.
+          </p>
+
+          {/* Zero metrics preview */}
+          <div className="grid grid-cols-2 gap-3 mb-6 text-left">
+            {[
+              { label: 'Commitment', value: '$0' },
+              { label: 'Capital Called', value: '$0' },
+              { label: 'Portfolio Value', value: '$0' },
+              { label: 'Distributions', value: '$0' },
+            ].map(item => (
+              <div key={item.label} className="bg-[#f9f8f5] rounded-xl p-3 border border-[#eaeaea]">
+                <div className="text-[10.5px] text-[#9b9890] font-medium uppercase tracking-wide mb-1">{item.label}</div>
+                <div className="text-[20px] font-bold text-[#c8c6c0]">{item.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-[#fffbeb] border border-[#fde68a] rounded-xl p-4 mb-6 text-left">
+            <div className="flex gap-2.5 items-start">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth={2} className="w-4 h-4 mt-0.5 flex-shrink-0">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              <div>
+                <div className="text-[12.5px] font-semibold text-[#92400e] mb-0.5">Awaiting fund assignment</div>
+                <div className="text-[12px] text-[#92400e]">
+                  Logged in as <span className="font-medium">{email}</span>. Contact your GP to link your LP record.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={onSignOut}
+            className="w-full py-2.5 rounded-xl border border-[#e8e6df] text-[13px] font-medium text-[#6b6860] hover:bg-[#f5f4f0] transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
+      </main>
+    </div>
+  );
+}
+
 export default function LPDashboardPage() {
   const router = useRouter();
   const [lp, setLp]             = useState<LP | null>(null);
@@ -63,11 +146,14 @@ export default function LPDashboardPage() {
   const [loading, setLoading]   = useState(true);
   const [view, setView]         = useState<'my-share' | 'fund-total'>('my-share');
   const [user, setUser]         = useState<any>(null);
+  // null = still loading, true = no LP record linked yet
+  const [pendingSetup, setPendingSetup] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUser(user);
       if (user) loadData(user.id);
+      else router.replace('/login');
     });
   }, []);
 
@@ -78,7 +164,11 @@ export default function LPDashboardPage() {
       const { data: lpData } = await supabase
         .from('lps').select('*').eq('user_id', userId).single();
 
-      if (!lpData) { router.replace('/login'); return; }
+      // No LP record yet — show zero pending state instead of redirecting
+      if (!lpData) {
+        setPendingSetup(true);
+        return;
+      }
       setLp(lpData as LP);
 
       const [
@@ -118,6 +208,16 @@ export default function LPDashboardPage() {
       </div>
     </div>
   );
+
+  // Show pending setup screen instead of redirecting to login
+  if (pendingSetup) {
+    return (
+      <PendingSetupScreen
+        email={user?.email ?? ''}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
 
   if (!lp || !fund) return (
     <div className="min-h-screen bg-[#f5f4f0] flex items-center justify-center">
@@ -469,7 +569,11 @@ export default function LPDashboardPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f9f8f5]">
-              {companies.map(c => {
+              {companies.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-8 text-center text-[13px] text-[#9b9890]">No portfolio companies yet</td>
+                </tr>
+              ) : companies.map(c => {
                 const myInvested = c.invested * (view === 'my-share' ? share : 1);
                 const myFV = (c.invested + c.unrealised) * (view === 'my-share' ? share : 1);
                 const gl = myFV - myInvested;

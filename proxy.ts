@@ -10,11 +10,10 @@ export async function proxy(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // Early return for auth, login, and LP portal routes
+  // Always allow auth and login routes through
   if (
     pathname.startsWith('/login') ||
-    pathname.startsWith('/auth') ||
-    pathname.startsWith('/lp/')
+    pathname.startsWith('/auth')
   ) {
     return response;
   }
@@ -39,11 +38,12 @@ export async function proxy(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
+  // Not logged in — redirect to login
   if (!user) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // Redirect LP-role users to their own portal
+  // Fetch role for this user
   const { data: roleData } = await supabase
     .from('user_roles')
     .select('role')
@@ -51,8 +51,27 @@ export async function proxy(request: NextRequest) {
     .eq('is_active', true)
     .single();
 
-  if (roleData?.role === 'LP') {
+  const role = roleData?.role ?? null;
+
+  // ── LP portal routes (/lp/*) ──────────────────────────────
+  if (pathname.startsWith('/lp/')) {
+    // Only LP role may access /lp/* — anyone else goes to GP portal
+    if (role !== 'LP') {
+      return NextResponse.redirect(new URL('/dashboard', request.url));
+    }
+    return response;
+  }
+
+  // ── GP portal routes (everything else) ───────────────────
+  // LP users must not access GP pages — send them to their portal
+  if (role === 'LP') {
     return NextResponse.redirect(new URL('/lp/dashboard', request.url));
+  }
+
+  // No role at all (invited but user_roles not yet assigned) —
+  // redirect to login with a message rather than exposing GP portal
+  if (!role) {
+    return NextResponse.redirect(new URL('/login?error=no_role', request.url));
   }
 
   return response;
