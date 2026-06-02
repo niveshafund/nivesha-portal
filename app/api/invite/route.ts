@@ -74,7 +74,7 @@ export async function POST(request: Request) {
   }, { onConflict: 'email' });
 
   const { error } = await supabaseAdmin.auth.admin.inviteUserByEmail(normalizedEmail, {
-    redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
+    redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
     data: { full_name: full_name?.trim() || null },
   });
 

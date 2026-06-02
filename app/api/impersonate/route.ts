@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     type: 'magiclink',
     email: email.trim().toLowerCase(),
     options: {
-      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
+      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/session`,
     },
   });
 
