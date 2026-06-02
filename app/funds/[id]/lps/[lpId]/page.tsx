@@ -8,6 +8,15 @@ import { getLPById, updateLP, deleteLP, getLPTransactions, addLPTransaction, del
 const fmtFull = (n: number | undefined | null) => n == null ? '$0' : `$${n.toLocaleString()}`;
 const fmtPct  = (n: number) => `${n.toFixed(2)}%`;
 
+const US_STATES = [
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
+  'HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
+  'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
+  'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY',
+  'DC',
+];
+
 export default function LPDetailPage({ params }: { params: Promise<{ id: string; lpId: string }> }) {
   const { id: fundId, lpId } = React.use(params);
   const router = useRouter();
@@ -21,7 +30,6 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
   const [showAddTxn, setShowAddTxn] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Edit form state
   const [form, setForm] = useState({
     name: '', email: '', phone: '', type: 'Individual',
     commitment: '', joinDate: '',
@@ -29,7 +37,6 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
     state: '', zip: '', country: 'USA', notes: '', gp_contact: '',
   });
 
-  // New capital call form
   const [txnForm, setTxnForm] = useState({ date: '', amount: '', type: 'Capital Call', notes: '' });
   const [txnError, setTxnError] = useState<string | null>(null);
   const [addingTxn, setAddingTxn] = useState(false);
@@ -38,10 +45,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
 
   async function load() {
     try {
-      const [lpData, txnsData] = await Promise.all([
-        getLPById(lpId),
-        getLPTransactions(lpId),
-      ]);
+      const [lpData, txnsData] = await Promise.all([getLPById(lpId), getLPTransactions(lpId)]);
       if (lpData) {
         setLP(lpData);
         setForm({
@@ -68,7 +72,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
   }
 
   const handleDelete = async () => {
-    if (txns.length > 0) return; // safety check
+    if (txns.length > 0) return;
     setDeleting(true);
     try {
       await deleteLP(lpId);
@@ -81,31 +85,12 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
 
   const handleExport = () => {
     if (!lp) return;
-    // Build CSV matching the LP import template format
-    const headers = [
-      'Investor Name*','Investing As','Commitment Amount*','Currency*',
-      'Called Capital','Distributions','Commitment Date','Email','Phone',
-      'Address Line 1','Address Line 2','City','State','ZIP Code','Country',
-      'GP Contact','Notes'
-    ];
-    const row = [
-      lp.name, '',
-      lp.commitment, 'USD',
-      lp.called, lp.distributions,
-      lp.join_date || '',
-      lp.email || '', lp.phone || '',
-      lp.address_line1 || '', lp.address_line2 || '',
-      lp.city || '', lp.state || '', lp.zip || '', lp.country || '',
-      lp.gp_contact || '', lp.notes || ''
-    ];
+    const headers = ['Investor Name*','Investing As','Commitment Amount*','Currency*','Called Capital','Distributions','Commitment Date','Email','Phone','Address Line 1','Address Line 2','City','State','ZIP Code','Country','GP Contact','Notes'];
+    const row = [lp.name,'',lp.commitment,'USD',lp.called,lp.distributions,lp.join_date||'',lp.email||'',lp.phone||'',lp.address_line1||'',lp.address_line2||'',lp.city||'',lp.state||'',lp.zip||'',lp.country||'',lp.gp_contact||'',lp.notes||''];
     const csv = [headers.join(','), row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `${lp.name.replace(/[^a-z0-9]/gi,'_')}_LP.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${lp.name.replace(/[^a-z0-9]/gi,'_')}_LP.csv`; a.click();
+    URL.revokeObjectURL(a.href);
   };
 
   const set = (k: string) =>
@@ -118,8 +103,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
 
   const handleSave = async () => {
     if (!form.name.trim()) return;
-    setSaving(true);
-    setSaveError(null);
+    setSaving(true); setSaveError(null);
     try {
       const updated = await updateLP(lpId, {
         name:          form.name.trim(),
@@ -147,21 +131,10 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
   };
 
   const handleAddTxn = async () => {
-    if (!txnForm.date || !txnForm.amount) {
-      setTxnError('Date and amount are required');
-      return;
-    }
-    setAddingTxn(true);
-    setTxnError(null);
+    if (!txnForm.date || !txnForm.amount) { setTxnError('Date and amount are required'); return; }
+    setAddingTxn(true); setTxnError(null);
     try {
-      await addLPTransaction({
-        lp_id:   lpId,
-        fund_id: fundId,
-        date:    txnForm.date,
-        amount:  Number(txnForm.amount),
-        type:    txnForm.type as any,
-        notes:   txnForm.notes || undefined,
-      });
+      await addLPTransaction({ lp_id: lpId, fund_id: fundId, date: txnForm.date, amount: Number(txnForm.amount), type: txnForm.type as any, notes: txnForm.notes || undefined });
       await load();
       setTxnForm({ date: '', amount: '', type: 'Capital Call', notes: '' });
       setShowAddTxn(false);
@@ -174,12 +147,8 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
 
   const handleDeleteTxn = async (txnId: string) => {
     if (!confirm('Delete this capital call entry?')) return;
-    try {
-      await deleteLPTransaction(txnId, lpId);
-      await load();
-    } catch (err: any) {
-      alert('Failed to delete: ' + err.message);
-    }
+    try { await deleteLPTransaction(txnId, lpId); await load(); }
+    catch (err: any) { alert('Failed to delete: ' + err.message); }
   };
 
   if (loading) return (
@@ -199,12 +168,15 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
     </div>
   );
 
-  const totalCalled     = txns.filter(t => t.type === 'Capital Call').reduce((s, t) => s + t.amount, 0);
-  const uncalled        = lp.commitment - totalCalled;
-  const callPct         = lp.commitment > 0 ? (totalCalled / lp.commitment) * 100 : 0;
+  const totalCalled = txns.filter(t => t.type === 'Capital Call').reduce((s, t) => s + t.amount, 0);
+  const uncalled    = lp.commitment - totalCalled;
+  const callPct     = lp.commitment > 0 ? (totalCalled / lp.commitment) * 100 : 0;
 
-  const inputCls = 'w-full px-3 py-2.5 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] font-sans outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 transition-colors';
+  const inputCls    = 'w-full px-3 py-2.5 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] font-sans outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 transition-colors';
   const readOnlyCls = 'w-full px-3 py-2.5 rounded-[7px] border border-[#e8e6df] bg-[#f9f8f5] text-[13px] text-[#6b6860]';
+
+  // Is this a US address?
+  const isUSA = form.country === 'USA' || form.country === 'US' || form.country === 'United States';
 
   return (
     <div className="max-w-4xl">
@@ -213,8 +185,6 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
         <div>
           <div className="flex items-center gap-2 text-[12.5px] text-[#6b6860] mb-2">
             <Link href={`/funds/${fundId}?tab=lps`} className="hover:text-[#2d5be3]">← Limited Partners</Link>
-            <span>/</span>
-            <Link href={`/funds/${fundId}?tab=lps`} className="hover:text-[#2d5be3]">Limited Partners</Link>
             <span>/</span>
             <span className="text-[#1a1917] font-medium">{lp.name}</span>
           </div>
@@ -229,29 +199,24 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
           </div>
         </div>
         <div className="flex gap-2">
-          <button onClick={handleExport}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
-            ↓ Export
-          </button>
-          <button onClick={() => setEditing(!editing)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+          <button onClick={handleExport} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↓ Export</button>
+          <button onClick={() => setEditing(!editing)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
             {editing ? '✕ Cancel Edit' : '✏️ Edit LP'}
           </button>
         </div>
       </div>
 
-      {saveError && (
-        <div className="bg-red-50 border border-red-200 rounded-[7px] px-4 py-3 text-[12.5px] text-red-700 mb-4">⚠️ {saveError}</div>
-      )}
+      {saveError && <div className="bg-red-50 border border-red-200 rounded-[7px] px-4 py-3 text-[12.5px] text-red-700 mb-4">⚠️ {saveError}</div>}
 
+      {/* KPI tiles */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         {[
-          { label: 'Commitment',   value: fmtFull(lp.commitment) },
-          { label: 'Called',       value: fmtFull(totalCalled) },
-          { label: 'Uncalled',     value: fmtFull(uncalled) },
-          { label: 'Distributions',value: fmtFull(lp.distributions) },
-          { label: '% of Fund',    value: fmtPct(lp.ownership_pct) },
-          { label: 'Status',       value: lp.status },
+          { label: 'Commitment',    value: fmtFull(lp.commitment) },
+          { label: 'Called',        value: fmtFull(totalCalled) },
+          { label: 'Uncalled',      value: fmtFull(uncalled) },
+          { label: 'Distributions', value: fmtFull(lp.distributions) },
+          { label: '% of Fund',     value: fmtPct(lp.ownership_pct) },
+          { label: 'Status',        value: lp.status },
         ].map(k => (
           <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
             <label className="text-[11px] text-[#6b6860] block mb-1">{k.label}</label>
@@ -283,13 +248,11 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
             <div className="text-[13.5px] font-semibold">Capital Call History</div>
             <div className="text-[11.5px] text-[#9b9890] mt-0.5">{txns.length} installment{txns.length !== 1 ? 's' : ''}</div>
           </div>
-          <button onClick={() => setShowAddTxn(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">
+          <button onClick={() => setShowAddTxn(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">
             + Add Capital Call
           </button>
         </div>
 
-        {/* Add transaction form */}
         {showAddTxn && (
           <div className="px-5 py-4 border-b border-[#e8e6df] bg-[#f9f8f5]">
             <div className="text-[13px] font-semibold mb-3">New Capital Call</div>
@@ -320,14 +283,10 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
               </div>
             </div>
             <div className="flex gap-2">
-              <button onClick={handleAddTxn} disabled={addingTxn}
-                className="px-3 py-1.5 rounded-[7px] text-[12px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
+              <button onClick={handleAddTxn} disabled={addingTxn} className="px-3 py-1.5 rounded-[7px] text-[12px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
                 {addingTxn ? 'Saving...' : 'Save'}
               </button>
-              <button onClick={() => { setShowAddTxn(false); setTxnError(null); }}
-                className="px-3 py-1.5 rounded-[7px] text-[12px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
-                Cancel
-              </button>
+              <button onClick={() => { setShowAddTxn(false); setTxnError(null); }} className="px-3 py-1.5 rounded-[7px] text-[12px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">Cancel</button>
             </div>
           </div>
         )}
@@ -340,18 +299,14 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
           </tr></thead>
           <tbody>
             {txns.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-[12.5px] text-[#9b9890]">
-                No capital calls yet. Click "Add Capital Call" to record the first installment.
-              </td></tr>
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-[12.5px] text-[#9b9890]">No capital calls yet. Click "Add Capital Call" to record the first installment.</td></tr>
             ) : txns.map((t, i) => {
               const cumulative = txns.slice(0, i + 1).filter(x => x.type === 'Capital Call').reduce((s, x) => s + x.amount, 0);
               return (
                 <tr key={t.id} className="hover:bg-[#f9f8f5] transition-colors">
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{t.date}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df]">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${t.type === 'Capital Call' ? 'bg-blue-50 text-blue-700' : t.type === 'Distribution' ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                      {t.type}
-                    </span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${t.type === 'Capital Call' ? 'bg-blue-50 text-blue-700' : t.type === 'Distribution' ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{t.type}</span>
                   </td>
                   <td className={`px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] font-medium ${t.type === 'Capital Call' ? 'text-[#1a1917]' : 'text-green-600'}`}>
                     {t.type === 'Distribution' ? '+' : ''}{fmtFull(t.amount)}
@@ -359,8 +314,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] text-[#6b6860]">{fmtFull(cumulative)}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{t.notes || '—'}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df]">
-                    <button onClick={() => handleDeleteTxn(t.id)}
-                      className="text-[11px] text-red-500 hover:text-red-700 transition-colors">Delete</button>
+                    <button onClick={() => handleDeleteTxn(t.id)} className="text-[11px] text-red-500 hover:text-red-700 transition-colors">Delete</button>
                   </td>
                 </tr>
               );
@@ -369,7 +323,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
         </table>
       </div>
 
-      {/* LP Details — view or edit */}
+      {/* LP Details */}
       <div className="bg-white border border-[#e8e6df] rounded-xl p-6 mb-6">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-[15px] font-semibold">Investor Details</h2>
@@ -412,16 +366,53 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">City</label>
                 <input value={form.city} onChange={set('city')} className={inputCls} />
               </div>
+
+              {/* ── State / ZIP — state is dropdown for USA, text input otherwise ── */}
               <div>
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">State / ZIP</label>
                 <div className="flex gap-2">
-                  <input value={form.state} onChange={set('state')} placeholder="State" className={inputCls + ' flex-1'} />
-                  <input value={form.zip} onChange={set('zip')} placeholder="ZIP" className={inputCls + ' w-24'} />
+                  {isUSA ? (
+                    <select
+                      value={form.state}
+                      onChange={set('state')}
+                      className={inputCls + ' flex-1'}
+                    >
+                      <option value="">— Select state —</option>
+                      {US_STATES.map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      value={form.state}
+                      onChange={set('state')}
+                      placeholder="State / Province"
+                      className={inputCls + ' flex-1'}
+                    />
+                  )}
+                  <input
+                    value={form.zip}
+                    onChange={set('zip')}
+                    placeholder="ZIP"
+                    className={inputCls + ' w-24'}
+                  />
                 </div>
               </div>
+
               <div>
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Country</label>
-                <input value={form.country} onChange={set('country')} className={inputCls} />
+                <select value={form.country} onChange={set('country')} className={inputCls}>
+                  <option value="USA">USA</option>
+                  <option value="India">India</option>
+                  <option value="UK">UK</option>
+                  <option value="Canada">Canada</option>
+                  <option value="Singapore">Singapore</option>
+                  <option value="UAE">UAE</option>
+                  <option value="Australia">Australia</option>
+                  <option value="Germany">Germany</option>
+                  <option value="France">France</option>
+                  <option value="Other">Other</option>
+                </select>
               </div>
               <div>
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Notes</label>
@@ -454,41 +445,27 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
           )}
         </div>
       </div>
-      {/* Delete LP section */}
+
+      {/* Danger Zone */}
       <div className="bg-white border border-red-200 rounded-xl p-6 mt-5">
         <h2 className="text-[15px] font-semibold text-red-600 mb-1">Danger Zone</h2>
-        <p className="text-[12px] text-[#9b9890] mb-4">
-          Delete this LP record. Only possible if no capital calls have been recorded.
-        </p>
+        <p className="text-[12px] text-[#9b9890] mb-4">Delete this LP record. Only possible if no capital calls have been recorded.</p>
         {txns.length > 0 ? (
           <div className="bg-red-50 border border-red-200 rounded-[7px] px-4 py-3 text-[12.5px] text-red-700">
-            ⛔ Cannot delete — this LP has {txns.length} capital call{txns.length !== 1 ? 's' : ''} recorded.
-            Remove all capital calls first before deleting the LP.
+            ⛔ Cannot delete — this LP has {txns.length} capital call{txns.length !== 1 ? 's' : ''} recorded. Remove all capital calls first before deleting the LP.
           </div>
         ) : !showDelete ? (
-          <button onClick={() => setShowDelete(true)}
-            className="px-4 py-2 rounded-[7px] text-[12.5px] font-medium border border-red-300 text-red-600 bg-white hover:bg-red-50 transition-colors">
+          <button onClick={() => setShowDelete(true)} className="px-4 py-2 rounded-[7px] text-[12.5px] font-medium border border-red-300 text-red-600 bg-white hover:bg-red-50 transition-colors">
             Delete This LP
           </button>
         ) : (
           <div className="bg-red-50 border border-red-200 rounded-[7px] p-4">
-            <p className="text-[12.5px] text-red-700 font-medium mb-1">
-              Are you sure you want to delete <strong>{lp?.name}</strong>?
-            </p>
+            <p className="text-[12.5px] text-red-700 font-medium mb-1">Are you sure you want to delete <strong>{lp?.name}</strong>?</p>
             <p className="text-[12px] text-red-500 mb-3">This cannot be undone.</p>
             <div className="flex gap-2">
-              <button onClick={() => setShowDelete(false)}
-                className="px-3 py-1.5 rounded-[7px] text-[12px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
-                Cancel
-              </button>
-              <button onClick={handleDelete} disabled={deleting}
-                className="px-3 py-1.5 rounded-[7px] text-[12px] font-medium bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-60 flex items-center gap-1.5">
-                {deleting ? (
-                  <><svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                  </svg>Deleting...</>
-                ) : 'Yes, Delete LP'}
+              <button onClick={() => setShowDelete(false)} className="px-3 py-1.5 rounded-[7px] text-[12px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">Cancel</button>
+              <button onClick={handleDelete} disabled={deleting} className="px-3 py-1.5 rounded-[7px] text-[12px] font-medium bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-60 flex items-center gap-1.5">
+                {deleting ? (<><svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Deleting...</>) : 'Yes, Delete LP'}
               </button>
             </div>
           </div>
