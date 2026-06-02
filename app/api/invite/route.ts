@@ -46,13 +46,13 @@ export async function POST(request: Request) {
 
   const normalizedEmail = email.trim().toLowerCase();
 
-  // Check if user already exists in auth.users
+  // Check if user already exists — if so, just ensure their role is correct.
+  // They don't need a new invite; they can log in directly via the login page.
   const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
   const existingUser = existingUsers?.users?.find(u => u.email === normalizedEmail);
 
   if (existingUser) {
-    // User already exists — ensure their user_roles row has the correct role,
-    // then send a magic link instead of an invite
+    // Upsert their role so they land on the right portal
     await supabaseAdmin.from('user_roles').upsert({
       user_id:   existingUser.id,
       role,
@@ -61,27 +61,16 @@ export async function POST(request: Request) {
       is_active: true,
     }, { onConflict: 'user_id' });
 
-    // Generate a magic link so they can access the portal
-    const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
-      type: 'magiclink',
-      email: normalizedEmail,
-      options: { redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback` },
-    });
-
-    if (linkError || !linkData?.properties?.action_link) {
-      return NextResponse.json({ error: linkError?.message ?? 'Failed to generate magic link' }, { status: 400 });
-    }
-
-    // Send email via Resend (or just return success — Supabase sends the email automatically via generateLink)
+    // Return a specific flag so the UI can show the right message
     return NextResponse.json({ success: true, existing_user: true });
   }
 
-  // New user — save pending invite and send invite email as before
+  // New user — save to pending_invites and send Supabase invite email
   await supabaseAdmin.from('pending_invites').upsert({
-    email:       normalizedEmail,
-    full_name:   full_name?.trim() || null,
+    email:      normalizedEmail,
+    full_name:  full_name?.trim() || null,
     role,
-    invited_by:  user.id,
+    invited_by: user.id,
   }, { onConflict: 'email' });
 
   const { error } = await supabaseAdmin.auth.admin.inviteUserByEmail(normalizedEmail, {

@@ -121,9 +121,10 @@ function LPRowMenu({ lp, fundId, onInvite, onImpersonate }: LPRowMenuProps) {
 
 // ── Invite Modal ──────────────────────────────────────────────
 function InviteModal({ lp, onClose }: { lp: DbLP; onClose: () => void }) {
-  const [sending, setSending] = useState(false);
-  const [sent, setSent]       = useState(false);
-  const [error, setError]     = useState<string | null>(null);
+  const [sending, setSending]       = useState(false);
+  const [sent, setSent]             = useState(false);
+  const [existingUser, setExistingUser] = useState(false);
+  const [error, setError]           = useState<string | null>(null);
   const email = lp.email ?? '';
 
   async function handleSend() {
@@ -137,6 +138,7 @@ function InviteModal({ lp, onClose }: { lp: DbLP; onClose: () => void }) {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Failed to send invite');
+      setExistingUser(json.existing_user === true);
       setSent(true);
     } catch (e: any) {
       setError(e.message);
@@ -215,11 +217,23 @@ function InviteModal({ lp, onClose }: { lp: DbLP; onClose: () => void }) {
                 <polyline points="20 6 9 17 4 12"/>
               </svg>
             </div>
-            <div className="text-[16px] font-semibold mb-1">Invite sent!</div>
-            <p className="text-[12.5px] text-[#9b9890] mb-5">
-              Magic link sent to <span className="font-medium text-[#1a1915]">{email}</span>.<br/>
-              They'll be redirected to their investor portal on first login.
-            </p>
+            {existingUser ? (
+              <>
+                <div className="text-[16px] font-semibold mb-1">Access granted!</div>
+                <p className="text-[12.5px] text-[#9b9890] mb-5">
+                  <span className="font-medium text-[#1a1915]">{email}</span> already has an account.<br/>
+                  Their role has been set to <span className="font-medium text-indigo-700">LP</span>. They can log in at any time by visiting the portal and entering their email to receive a magic link.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="text-[16px] font-semibold mb-1">Invite sent!</div>
+                <p className="text-[12.5px] text-[#9b9890] mb-5">
+                  Invitation email sent to <span className="font-medium text-[#1a1915]">{email}</span>.<br/>
+                  They'll click the link to confirm their account, then log in via magic link.
+                </p>
+              </>
+            )}
             <button onClick={onClose} className="px-6 py-2 rounded-xl bg-[#2d5be3] text-white text-[13px] font-medium hover:bg-[#2450cc] transition-colors">
               Done
             </button>
