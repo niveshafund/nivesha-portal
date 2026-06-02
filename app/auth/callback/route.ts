@@ -3,21 +3,22 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import type { EmailOtpType } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
-  const code = requestUrl.searchParams.get('code');
-  const next = requestUrl.searchParams.get('next') ?? '/';
+  const code       = requestUrl.searchParams.get('code');
+  const token_hash = requestUrl.searchParams.get('token_hash') ?? requestUrl.searchParams.get('token');
+  const type       = requestUrl.searchParams.get('type') as EmailOtpType | null;
+  const next       = requestUrl.searchParams.get('next') ?? '/';
 
-  // 1. Initialize the redirect response object right away
-  const response = NextResponse.redirect(new URL(next, requestUrl.origin));
-
+  // ── Path A: PKCE magic link (code exchange) ──────────────
   if (code) {
     const cookieStore = await cookies();
+    const response = NextResponse.redirect(new URL(next, requestUrl.origin));
 
-    // 2. Initialize the Supabase Client with direct response mutation access
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -26,10 +27,7 @@ export async function GET(request: NextRequest) {
           getAll: () => cookieStore.getAll(),
           setAll: (cookiesToSet) => {
             cookiesToSet.forEach(({ name, value, options }) => {
-              // Ensure path scopes are bound globally across all tabs
               const cookieOptions = { ...options, path: '/' };
-              
-              // Synchronize the token securely to both contexts simultaneously
               cookieStore.set(name, value, cookieOptions);
               response.cookies.set(name, value, cookieOptions);
             });
@@ -38,15 +36,46 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    // 3. Complete the single-use token handshake
     const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (!error) return response;
+
+    console.error('[callback] exchange error:', error.message);
+    return NextResponse.redirect(
+      new URL(`/login?error=${encodeURIComponent(error.message)}`, requestUrl.origin)
+    );
+  }
+
+  // ── Path B: Invite / OTP token (token_hash + type) ───────
+  // Handles: type=invite, type=magiclink, type=recovery etc.
+  if (token_hash && type) {
+    const cookieStore = await cookies();
+    const response = NextResponse.redirect(new URL('/', requestUrl.origin));
+
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll: () => cookieStore.getAll(),
+          setAll: (cookiesToSet) => {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              const cookieOptions = { ...options, path: '/' };
+              cookieStore.set(name, value, cookieOptions);
+              response.cookies.set(name, value, cookieOptions);
+            });
+          },
+        },
+      }
+    );
+
+    const { error } = await supabase.auth.verifyOtp({ type, token_hash });
 
     if (!error) {
-      console.log('[callback] Handshake successful! Redirecting to secure home...');
+      console.log(`[callback] OTP verified (type=${type}), redirecting...`);
       return response;
     }
 
-    console.error('[callback] exchange error:', error.message);
+    console.error('[callback] OTP error:', error.message);
     return NextResponse.redirect(
       new URL(`/login?error=${encodeURIComponent(error.message)}`, requestUrl.origin)
     );
