@@ -50,7 +50,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
 
   // Edit form
   const [form, setForm] = useState({
-    name: '', sector: '', stage: '', website: '', status: 'Active',
+    name: '', legalName: '', sector: '', stage: '', website: '', status: 'Active',
     ceoName: '', ceoEmail: '', ceoPhone: '',
     headline: '', about: '',
   });
@@ -137,6 +137,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
         setCompany(co);
         setForm({
           name:     co.name,
+          legalName: (co as any).legal_name ?? '',
           sector:   co.sector    ?? '',
           stage:    co.stage     ?? '',
           website:  co.website   ?? '',
@@ -268,6 +269,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
         contact_email: form.ceoEmail || undefined,
         headline:      form.headline || undefined,
         about:         form.about    || undefined,
+        ...(form.legalName ? { legal_name: form.legalName } as any : {}),
       });
       setCompany(updated);
       setEditing(false);
@@ -689,6 +691,10 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                 <input value={form.name} onChange={set('name')} className={inputCls} />
               </div>
               <div>
+                <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Legal Name <span className="font-normal">(optional)</span></label>
+                <input value={form.legalName} onChange={set('legalName')} placeholder="e.g. Acme Technologies Inc." className={inputCls} />
+              </div>
+              <div>
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Status</label>
                 <select value={form.status} onChange={set('status')} className={inputCls}>
                   <option value="Active">Active</option>
@@ -739,6 +745,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
             <div className="grid grid-cols-2 gap-x-12 gap-y-4">
               {[
                 { label: 'Company Name',    value: company.name },
+                { label: 'Legal Name',      value: (company as any).legal_name || '—' },
                 { label: 'Status',          value: company.status },
                 { label: 'Sector',          value: company.sector || '—' },
                 { label: 'Stage',           value: company.stage  || '—' },
