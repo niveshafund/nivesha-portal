@@ -29,6 +29,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
   const [saving, setSaving] = useState(false);
   const [showAddTxn, setShowAddTxn] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [confirmTxnId, setConfirmTxnId] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     name: '', email: '', phone: '', type: 'Individual',
@@ -75,7 +76,9 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
     if (txns.length > 0) return;
     setDeleting(true);
     try {
-      await deleteLP(lpId);
+      const res = await fetch(`/api/lp/${lpId}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Failed to delete LP');
       router.push(`/funds/${fundId}`);
     } catch (err: any) {
       alert('Failed to delete LP: ' + err.message);
@@ -146,9 +149,20 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
   };
 
   const handleDeleteTxn = async (txnId: string) => {
-    if (!confirm('Delete this capital call entry?')) return;
-    try { await deleteLPTransaction(txnId, lpId); await load(); }
-    catch (err: any) { alert('Failed to delete: ' + err.message); }
+    // Show confirm modal instead of browser confirm()
+    setConfirmTxnId(txnId);
+  };
+
+  const confirmDeleteTxn = async () => {
+    if (!confirmTxnId) return;
+    try {
+      await deleteLPTransaction(confirmTxnId, lpId);
+      await load();
+    } catch (err: any) {
+      alert('Failed to delete: ' + err.message);
+    } finally {
+      setConfirmTxnId(null);
+    }
   };
 
   if (loading) return (
@@ -173,13 +187,34 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
   const callPct     = lp.commitment > 0 ? (totalCalled / lp.commitment) * 100 : 0;
 
   const inputCls    = 'w-full px-3 py-2.5 rounded-[7px] border border-[#e8e6df] bg-white text-[13px] font-sans outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 transition-colors';
-  const readOnlyCls = 'w-full px-3 py-2.5 rounded-[7px] border border-[#e8e6df] bg-[#f9f8f5] text-[13px] text-[#6b6860]';
-
-  // Is this a US address?
   const isUSA = form.country === 'USA' || form.country === 'US' || form.country === 'United States';
 
   return (
     <div className="max-w-4xl">
+
+      {/* ── Confirm Delete Transaction Modal ── */}
+      {confirmTxnId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setConfirmTxnId(null)} />
+          <div className="relative bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
+            <div className="text-[14px] font-semibold mb-2">Delete this entry?</div>
+            <p className="text-[13px] text-[#6b6860] mb-5">
+              This will permanently remove this capital call record. This cannot be undone.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmTxnId(null)}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                Cancel
+              </button>
+              <button onClick={confirmDeleteTxn}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] font-medium bg-red-500 text-white hover:bg-red-600 transition-colors">
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between mb-5">
         <div>
@@ -366,39 +401,20 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">City</label>
                 <input value={form.city} onChange={set('city')} className={inputCls} />
               </div>
-
-              {/* ── State / ZIP — state is dropdown for USA, text input otherwise ── */}
               <div>
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">State / ZIP</label>
                 <div className="flex gap-2">
                   {isUSA ? (
-                    <select
-                      value={form.state}
-                      onChange={set('state')}
-                      className={inputCls + ' w-[160px] min-w-[160px]'}
-                    >
+                    <select value={form.state} onChange={set('state')} className={inputCls + ' w-[160px] min-w-[160px]'}>
                       <option value="">— State —</option>
-                      {US_STATES.map(s => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
+                      {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   ) : (
-                    <input
-                      value={form.state}
-                      onChange={set('state')}
-                      placeholder="State / Province"
-                      className={inputCls + ' flex-1'}
-                    />
+                    <input value={form.state} onChange={set('state')} placeholder="State / Province" className={inputCls + ' flex-1'} />
                   )}
-                  <input
-                    value={form.zip}
-                    onChange={set('zip')}
-                    placeholder="ZIP"
-                    className={inputCls + ' w-28'}
-                  />
+                  <input value={form.zip} onChange={set('zip')} placeholder="ZIP" className={inputCls + ' w-28'} />
                 </div>
               </div>
-
               <div>
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Country</label>
                 <select value={form.country} onChange={set('country')} className={inputCls}>
@@ -426,15 +442,15 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
           ) : (
             <>
               {[
-                { label: 'Name',         value: lp.name },
-                { label: 'Email',        value: lp.email || '—' },
-                { label: 'Phone',        value: lp.phone || '—' },
-                { label: 'Type',         value: lp.type },
-                { label: 'Commitment',   value: fmtFull(lp.commitment) },
-                { label: 'Join Date',    value: lp.join_date || '—' },
-                { label: 'Address',      value: [lp.address_line1, lp.address_line2, lp.city, lp.state, lp.zip, lp.country].filter(Boolean).join(', ') || '—' },
-                { label: 'GP Contact',   value: lp.gp_contact || '—' },
-                { label: 'Notes',        value: lp.notes || '—' },
+                { label: 'Name',       value: lp.name },
+                { label: 'Email',      value: lp.email || '—' },
+                { label: 'Phone',      value: lp.phone || '—' },
+                { label: 'Type',       value: lp.type },
+                { label: 'Commitment', value: fmtFull(lp.commitment) },
+                { label: 'Join Date',  value: lp.join_date || '—' },
+                { label: 'Address',    value: [lp.address_line1, lp.address_line2, lp.city, lp.state, lp.zip, lp.country].filter(Boolean).join(', ') || '—' },
+                { label: 'GP Contact', value: lp.gp_contact || '—' },
+                { label: 'Notes',      value: lp.notes || '—' },
               ].map(row => (
                 <div key={row.label} className="border-b border-[#f0f0ed] pb-3">
                   <div className="text-[11.5px] text-[#9b9890] mb-0.5">{row.label}</div>
