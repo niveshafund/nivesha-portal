@@ -1,16 +1,18 @@
-// proxy.ts (project root)
+// middleware.ts  (project root — Next.js only recognises this exact filename)
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
     request: { headers: request.headers },
   });
 
   const pathname = request.nextUrl.pathname;
 
-  // Always allow auth and login routes through
+  // ── Always allow auth / login routes through ──────────────
+  // This must come BEFORE the Supabase client is used so that
+  // /auth/callback can set session cookies without being redirected.
   if (
     pathname.startsWith('/login') ||
     pathname.startsWith('/auth')
@@ -36,6 +38,7 @@ export async function proxy(request: NextRequest) {
     }
   );
 
+  // getUser() makes a server-side call — more reliable than getSession()
   const { data: { user } } = await supabase.auth.getUser();
 
   // Not logged in — redirect to login
@@ -55,7 +58,6 @@ export async function proxy(request: NextRequest) {
 
   // ── LP portal routes (/lp/*) ──────────────────────────────
   if (pathname.startsWith('/lp/')) {
-    // Only LP role may access /lp/* — anyone else goes to GP portal
     if (role !== 'LP') {
       return NextResponse.redirect(new URL('/dashboard', request.url));
     }
@@ -63,13 +65,11 @@ export async function proxy(request: NextRequest) {
   }
 
   // ── GP portal routes (everything else) ───────────────────
-  // LP users must not access GP pages — send them to their portal
   if (role === 'LP') {
     return NextResponse.redirect(new URL('/lp/dashboard', request.url));
   }
 
-  // No role at all (invited but user_roles not yet assigned) —
-  // redirect to login with a message rather than exposing GP portal
+  // Invited user whose role hasn't been assigned yet
   if (!role) {
     return NextResponse.redirect(new URL('/login?error=no_role', request.url));
   }
@@ -79,6 +79,15 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|auth/callback|api/).*)',
+    /*
+     * Match everything except:
+     *  - _next/static  (static files)
+     *  - _next/image   (image optimisation)
+     *  - favicon.ico
+     *  - /auth/*       (callback + session pages — must be exempt so
+     *                   Supabase can land the user and set cookies)
+     *  - /api/*        (API routes handle their own auth)
+     */
+    '/((?!_next/static|_next/image|favicon.ico|auth/|api/).*)',
   ],
 };

@@ -7,8 +7,10 @@ export default function AuthSessionPage() {
   const router = useRouter();
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
+    // getUser() validates against the Supabase server — more reliable than
+    // getSession() which only reads local storage and can return stale tokens.
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
         router.replace('/');
       } else {
         router.replace('/login?error=no_code');
