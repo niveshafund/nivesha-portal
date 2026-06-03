@@ -1246,22 +1246,31 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                 </select>
               </div>
               <div>
-                <label className="block text-[12px] font-medium mb-1">Company Value (USD)</label>
+                <label className="block text-[12px] font-medium mb-1">Investment Value (USD) *</label>
+                <p className="text-[11px] text-[#9b9890] mb-1">Your stake's current worth</p>
                 <input type="number" value={editingVal.value}
-                  onChange={e => setEditingVal(v => v ? {...v, value: Number(e.target.value)} : null)}
+                  onChange={e => {
+                    const newVal = Number(e.target.value);
+                    const newMoic = totalInvested > 0 ? newVal / totalInvested : 0;
+                    const yrs = years;
+                    const newIrr = yrs > 0.01 && newVal > 0 && totalInvested > 0
+                      ? ((newVal / totalInvested) ** (1/yrs) - 1) * 100 : 0;
+                    setEditingVal(v => v ? {...v, value: newVal, moic: newMoic, irr: newIrr} : null);
+                  }}
                   className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
               </div>
               <div>
-                <label className="block text-[12px] font-medium mb-1">MOIC</label>
-                <input type="number" step="0.01" value={editingVal.moic}
-                  onChange={e => setEditingVal(v => v ? {...v, moic: Number(e.target.value)} : null)}
-                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+                <label className="block text-[12px] font-medium mb-1">Total Company Value (optional)</label>
+                <p className="text-[11px] text-[#9b9890] mb-1">100% enterprise value</p>
+                <input type="number" value={(editingVal as any).company_value || ''}
+                  onChange={e => setEditingVal(v => v ? {...v, company_value: e.target.value} as any : null)}
+                  className="w-full px-3 py-2 rounded-[7px] border border-dashed border-[#c8c6bf] text-[13px] outline-none focus:border-[#2d5be3]" />
               </div>
               <div>
-                <label className="block text-[12px] font-medium mb-1">IRR (%)</label>
-                <input type="number" step="0.1" value={editingVal.irr}
-                  onChange={e => setEditingVal(v => v ? {...v, irr: Number(e.target.value)} : null)}
-                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+                <label className="block text-[12px] font-medium mb-1">MOIC (auto-calculated)</label>
+                <div className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] bg-[#f9f8f5] text-[#6b6860]">
+                  {editingVal.moic > 0 ? editingVal.moic.toFixed(2) + 'x' : '—'}
+                </div>
               </div>
               <div>
                 <label className="block text-[12px] font-medium mb-1">Round</label>
