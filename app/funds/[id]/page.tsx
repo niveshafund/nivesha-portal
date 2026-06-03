@@ -894,7 +894,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtFull(lp.commitment)}</td>
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtFull(lp.called)}</td>
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{lp.distributions > 0 ? fmtFull(lp.distributions) : '—'}</td>
-                        <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px]">{fmtPct(lp.ownership_pct)}</td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px]">{fmtPct(totalCalled > 0 ? (lp.called / totalCalled) * 100 : 0)}</td>
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">
                           {lp.gp_contact
                             ? <span className="inline-flex items-center gap-1"><span className="w-4 h-4 rounded-full flex items-center justify-center text-white text-[7px] font-bold flex-shrink-0" style={{ background: coColor(lp.gp_contact) }}>{lp.gp_contact.slice(0,1)}</span>{lp.gp_contact}</span>

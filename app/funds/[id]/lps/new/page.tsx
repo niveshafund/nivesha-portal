@@ -5,46 +5,20 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createLP, getLPsByFund, getFundMembersByRole, DbFundMember } from '@/lib/db';
 
-const US_STATES = [
-  'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut',
-  'Delaware','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa',
-  'Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan',
-  'Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada',
-  'New Hampshire','New Jersey','New Mexico','New York','North Carolina',
-  'North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island',
-  'South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont',
-  'Virginia','Washington','West Virginia','Wisconsin','Wyoming','Washington D.C.',
-];
-
-const COUNTRIES = [
-  'USA','India','United Kingdom','Canada','Australia','Singapore','Germany',
-  'France','Netherlands','Israel','Sweden','Switzerland','UAE','Japan',
-  'South Korea','Brazil','Mexico','South Africa','Nigeria','Kenya','Other',
-];
-
+const US_STATES = ['Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia','Wisconsin','Wyoming','Washington D.C.'];
+const COUNTRIES = ['USA','India','United Kingdom','Canada','Australia','Singapore','Germany','France','Netherlands','Israel','Sweden','Switzerland','UAE','Japan','South Korea','Brazil','Mexico','South Africa','Nigeria','Kenya','Other'];
 const LP_TYPES = ['Individual','Institution','Family Office','Corporate'];
+const isEntity = (type: string) => ['Institution','Family Office','Corporate'].includes(type);
 
 type Form = {
-  name: string;
-  email: string;
-  phone: string;
-  type: string;
-  commitment: string;
-  joinDate: string;
-  addressLine1: string;
-  addressLine2: string;
-  city: string;
-  state: string;
-  zip: string;
-  country: string;
-  notes: string;
-  gp_contact: string;
+  name: string; entityName: string; email: string; phone: string; type: string;
+  commitment: string; joinDate: string; addressLine1: string; addressLine2: string;
+  city: string; state: string; zip: string; country: string; notes: string; gp_contact: string;
 };
 
 const empty: Form = {
-  name: '', email: '', phone: '', type: 'Individual',
-  commitment: '', joinDate: '',
-  addressLine1: '', addressLine2: '', city: '',
+  name: '', entityName: '', email: '', phone: '', type: 'Individual',
+  commitment: '', joinDate: '', addressLine1: '', addressLine2: '', city: '',
   state: '', zip: '', country: 'USA', notes: '', gp_contact: '',
 };
 
@@ -57,11 +31,8 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
   const [saveError, setSaveError] = useState<string | null>(null);
   const [gps, setGPs] = useState<DbFundMember[]>([]);
 
-  // Load GPs for this fund dynamically from fund_members
   useEffect(() => {
-    getFundMembersByRole(fundId, 'GP')
-      .then(setGPs)
-      .catch(() => setGPs([]));
+    getFundMembersByRole(fundId, 'GP').then(setGPs).catch(() => setGPs([]));
   }, [fundId]);
 
   const set = (k: keyof Form) =>
@@ -70,45 +41,39 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
 
   const validate = () => {
     const e: Partial<Record<keyof Form, string>> = {};
-    if (!form.name.trim())       e.name = 'Investor name is required';
+    if (!form.name.trim()) e.name = 'Investor name is required';
+    if (isEntity(form.type) && !form.entityName.trim()) e.entityName = 'Entity name is required';
     if (!form.commitment.trim()) e.commitment = 'Commitment amount is required';
-    else if (isNaN(Number(form.commitment)) || Number(form.commitment) <= 0)
-      e.commitment = 'Enter a valid positive amount';
-    if (form.email && !/\S+@\S+\.\S+/.test(form.email))
-      e.email = 'Enter a valid email address';
+    else if (isNaN(Number(form.commitment)) || Number(form.commitment) <= 0) e.commitment = 'Enter a valid positive amount';
+    if (form.email && !/\S+@\S+\.\S+/.test(form.email)) e.email = 'Enter a valid email address';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
   const handleSave = async () => {
     if (!validate()) return;
-    setSaving(true);
-    setSaveError(null);
+    setSaving(true); setSaveError(null);
     try {
       const existingLPs = await getLPsByFund(fundId);
       const totalCommitted = existingLPs.reduce((s, lp) => s + lp.commitment, 0) + Number(form.commitment);
       const ownershipPct = totalCommitted > 0 ? (Number(form.commitment) / totalCommitted) * 100 : 0;
 
+      // For entities, the LP name = entity name; contact person goes in notes
+      const displayName = isEntity(form.type) ? form.entityName.trim() : form.name.trim();
+      const notesWithContact = isEntity(form.type) && form.name.trim()
+        ? `Contact: ${form.name.trim()}${form.notes ? '\n' + form.notes : ''}`
+        : form.notes;
+
       await createLP({
-        fund_id:       fundId,
-        name:          form.name.trim(),
-        email:         form.email || undefined,
-        phone:         form.phone || undefined,
-        type:          form.type as any,
-        commitment:    Number(form.commitment),
-        called:        0,
-        distributions: 0,
-        ownership_pct: ownershipPct,
-        status:        'Active',
-        join_date:     form.joinDate || undefined,
-        address_line1: form.addressLine1 || undefined,
-        address_line2: form.addressLine2 || undefined,
-        city:          form.city || undefined,
-        state:         form.state || undefined,
-        zip:           form.zip || undefined,
-        country:       form.country || undefined,
-        notes:         form.notes || undefined,
-        gp_contact:    form.gp_contact || undefined,
+        fund_id: fundId, name: displayName,
+        email: form.email || undefined, phone: form.phone || undefined,
+        type: form.type as any, commitment: Number(form.commitment),
+        called: 0, distributions: 0, ownership_pct: ownershipPct, status: 'Active',
+        join_date: form.joinDate || undefined,
+        address_line1: form.addressLine1 || undefined, address_line2: form.addressLine2 || undefined,
+        city: form.city || undefined, state: form.state || undefined,
+        zip: form.zip || undefined, country: form.country || undefined,
+        notes: notesWithContact || undefined, gp_contact: form.gp_contact || undefined,
       });
       router.push(`/funds/${fundId}?tab=lps`);
     } catch (err: any) {
@@ -120,9 +85,7 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
 
   const inputCls = (field: keyof Form) =>
     'w-full px-3 py-2.5 rounded-[7px] border text-[13px] font-sans outline-none transition-colors ' +
-    (errors[field]
-      ? 'border-red-400 bg-red-50'
-      : 'border-[#e8e6df] bg-white focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10');
+    (errors[field] ? 'border-red-400 bg-red-50' : 'border-[#e8e6df] bg-white focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10');
 
   const selectedGP = gps.find(g => g.name === form.gp_contact);
 
@@ -136,27 +99,19 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
         </div>
       </div>
 
-      {saveError && (
-        <div className="bg-red-50 border border-red-200 rounded-[7px] px-4 py-3 text-[12.5px] text-red-700 mb-4">
-          ⚠️ {saveError}
-        </div>
-      )}
+      {saveError && <div className="bg-red-50 border border-red-200 rounded-[7px] px-4 py-3 text-[12.5px] text-red-700 mb-4">⚠️ {saveError}</div>}
 
       {/* Investor Information */}
       <div className="bg-white border border-[#e8e6df] rounded-xl p-6 mb-4">
         <h2 className="text-[15px] font-semibold mb-5">Investor Information</h2>
 
-        <div className="mb-5">
-          <label className="block text-[13px] font-medium mb-1">Investor Name <span className="text-red-500">*</span></label>
-          <input type="text" value={form.name} onChange={set('name')} placeholder="e.g., Sunil Potti" className={inputCls('name')} />
-          {errors.name && <p className="text-[11px] text-red-500 mt-1">{errors.name}</p>}
-        </div>
-
+        {/* Type selector */}
         <div className="mb-5">
           <label className="block text-[13px] font-medium mb-2">Investor Type</label>
           <div className="flex flex-wrap gap-2">
             {LP_TYPES.map(t => (
-              <button key={t} type="button" onClick={() => setForm(f => ({ ...f, type: t }))}
+              <button key={t} type="button"
+                onClick={() => setForm(f => ({ ...f, type: t, entityName: '' }))}
                 className={'px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border transition-all ' +
                   (form.type === t ? 'bg-[#2d5be3] text-white border-[#2d5be3]' : 'bg-white text-[#6b6860] border-[#e8e6df] hover:border-[#2d5be3]')}>
                 {t}
@@ -165,41 +120,57 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
           </div>
         </div>
 
-        {/* GP Contact — dynamic from fund_members */}
+        {/* Entity name — only for non-Individual */}
+        {isEntity(form.type) && (
+          <div className="mb-5 p-4 bg-[#f5f7ff] border border-[#c7d7f9] rounded-xl">
+            <label className="block text-[13px] font-medium mb-1">
+              {form.type} Name <span className="text-red-500">*</span>
+            </label>
+            <p className="text-[12px] text-[#6b6860] mb-2">
+              Legal name of the {form.type.toLowerCase()} investing in the fund
+            </p>
+            <input type="text" value={form.entityName} onChange={set('entityName')}
+              placeholder={
+                form.type === 'Institution' ? 'e.g., Sequoia Capital' :
+                form.type === 'Family Office' ? 'e.g., Potti Family Office' :
+                'e.g., Acme Holdings LLC'}
+              className={inputCls('entityName')} />
+            {errors.entityName && <p className="text-[11px] text-red-500 mt-1">{errors.entityName}</p>}
+          </div>
+        )}
+
+        {/* Contact / Investor name */}
         <div className="mb-5">
           <label className="block text-[13px] font-medium mb-1">
-            GP Contact <span className="text-[#9b9890] font-normal">(optional)</span>
+            {isEntity(form.type) ? 'Contact Person Name' : 'Investor Name'} <span className="text-red-500">*</span>
           </label>
+          {isEntity(form.type) && <p className="text-[12px] text-[#6b6860] mb-2">Primary contact at this {form.type.toLowerCase()}</p>}
+          <input type="text" value={form.name} onChange={set('name')} placeholder="e.g., Sunil Potti" className={inputCls('name')} />
+          {errors.name && <p className="text-[11px] text-red-500 mt-1">{errors.name}</p>}
+        </div>
+
+        {/* GP Contact */}
+        <div className="mb-5">
+          <label className="block text-[13px] font-medium mb-1">GP Contact <span className="text-[#9b9890] font-normal">(optional)</span></label>
           <p className="text-[12px] text-[#9b9890] mb-2">The partner who brought this LP into the fund</p>
           {gps.length === 0 ? (
-            <p className="text-[12px] text-[#9b9890] italic">
-              No GPs added to this fund yet.{' '}
-              <Link href={`/funds/${fundId}?tab=members`} className="text-[#2d5be3] hover:underline">Add GPs in the Members tab →</Link>
-            </p>
+            <p className="text-[12px] text-[#9b9890] italic">No GPs added to this fund yet. <Link href={`/funds/${fundId}?tab=members`} className="text-[#2d5be3] hover:underline">Add GPs in the Members tab →</Link></p>
           ) : (
             <div className="flex flex-wrap gap-2">
               {gps.map(gp => (
-                <button
-                  key={gp.id}
-                  type="button"
+                <button key={gp.id} type="button"
                   onClick={() => setForm(f => ({ ...f, gp_contact: f.gp_contact === gp.name ? '' : gp.name }))}
                   className={'px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border transition-all ' +
-                    (form.gp_contact === gp.name
-                      ? 'bg-[#2d5be3] text-white border-[#2d5be3]'
-                      : 'bg-white text-[#6b6860] border-[#e8e6df] hover:border-[#2d5be3]')}
-                >
-                  {gp.name}
-                  {gp.title && <span className="ml-1 opacity-70 text-[10.5px]">· {gp.title}</span>}
+                    (form.gp_contact === gp.name ? 'bg-[#2d5be3] text-white border-[#2d5be3]' : 'bg-white text-[#6b6860] border-[#e8e6df] hover:border-[#2d5be3]')}>
+                  {gp.name}{gp.title && <span className="ml-1 opacity-70 text-[10.5px]">· {gp.title}</span>}
                 </button>
               ))}
             </div>
           )}
-          {selectedGP?.email && (
-            <p className="text-[11px] text-[#6b6860] mt-1.5">{selectedGP.email}</p>
-          )}
+          {selectedGP?.email && <p className="text-[11px] text-[#6b6860] mt-1.5">{selectedGP.email}</p>}
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-5">
+        <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-[13px] font-medium mb-1">Email <span className="text-[#9b9890] font-normal">(optional)</span></label>
             <input type="email" value={form.email} onChange={set('email')} placeholder="investor@example.com" className={inputCls('email')} />
@@ -220,12 +191,9 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
             <label className="block text-[13px] font-medium mb-1">Commitment Amount (USD) <span className="text-red-500">*</span></label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[13px]">$</span>
-              <input type="number" value={form.commitment} onChange={set('commitment')} placeholder="0"
-                className={inputCls('commitment') + ' pl-6'} />
+              <input type="number" value={form.commitment} onChange={set('commitment')} placeholder="0" className={inputCls('commitment') + ' pl-6'} />
             </div>
-            {form.commitment && Number(form.commitment) > 0 && (
-              <p className="text-[11px] text-[#6b6860] mt-1">${Number(form.commitment).toLocaleString()}</p>
-            )}
+            {form.commitment && Number(form.commitment) > 0 && <p className="text-[11px] text-[#6b6860] mt-1">${Number(form.commitment).toLocaleString()}</p>}
             {errors.commitment && <p className="text-[11px] text-red-500 mt-1">{errors.commitment}</p>}
           </div>
           <div>
@@ -284,17 +252,10 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
       <div className="flex items-center justify-between pb-8">
         <p className="text-[12px] text-[#9b9890]">Fields marked <span className="text-red-500">*</span> are required</p>
         <div className="flex gap-3">
-          <Link href={`/funds/${fundId}`} className="px-5 py-2 rounded-[7px] text-[13px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
-            Cancel
-          </Link>
+          <Link href={`/funds/${fundId}`} className="px-5 py-2 rounded-[7px] text-[13px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">Cancel</Link>
           <button onClick={handleSave} disabled={saving}
             className="px-6 py-2 rounded-[7px] text-[13px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2">
-            {saving ? (
-              <><svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-              </svg>Saving...</>
-            ) : 'Add Limited Partner'}
+            {saving ? (<><svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Saving...</>) : 'Add Limited Partner'}
           </button>
         </div>
       </div>
