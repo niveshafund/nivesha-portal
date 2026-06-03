@@ -199,8 +199,15 @@ export default function ImportModal({ type, fundId, onClose, onDone }: Props) {
           if (!name)       throw new Error('Investor Name is required');
           if (!commitment) throw new Error('Commitment Amount is required');
 
+          // Investing As = entity name (Institution/Family Office/Corporate)
+          const investingAs = String(row['Investing As'] || '').trim();
+          const lpType = investingAs
+            ? (['Institution','Family Office','Corporate'].includes(investingAs) ? investingAs : 'Individual')
+            : 'Individual';
+
+          // Store entity name in notes if present
           const notesVal = [
-            row['Contact Name'] ? `Contact: ${row['Contact Name']}` : '',
+            investingAs && lpType !== 'Individual' ? `${lpType}: ${investingAs}` : '',
             row['Notes'] || '',
           ].filter(Boolean).join(' | ') || null;
 
@@ -209,7 +216,7 @@ export default function ImportModal({ type, fundId, onClose, onDone }: Props) {
             name,
             email:         row['Email'] || null,
             phone:         row['Phone'] || null,
-            type:          'Individual',
+            type:          lpType as any,
             commitment,
             called,
             distributions: distrib,
