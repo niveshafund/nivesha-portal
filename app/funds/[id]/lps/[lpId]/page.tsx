@@ -355,6 +355,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
         ))}
       </div>
 
+      {activeTab === 'details' && (<>
       {/* KPI tiles */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         {[
@@ -575,7 +576,6 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
         </div>
       </div>
 
-      {activeTab === 'details' && (<>
 
       {/* Danger Zone */}
       <div className="bg-white border border-red-200 rounded-xl p-6 mt-5">
