@@ -26,10 +26,20 @@ type Props = {
 // ─── COLUMN MAPS ─────────────────────────────────────────────
 
 const LP_COLS = [
-  'Investor Name*', 'Investing As', 'Commitment Amount*', 'Currency*',
-  'Called Capital', 'Distributions',
-  'Commitment Date', 'Email', 'Phone', 'GP Contact',
-  'Address Line 1', 'Address Line 2', 'City', 'State', 'ZIP Code', 'Country',
+  'Investor Name*',
+  'Investor Type',
+  'Entity Name',
+  'Commitment Amount*',
+  'Currency*',
+  'Called Capital',
+  'Distributions',
+  'Commitment Date',
+  'Email',
+  'Phone',
+  'GP Contact',
+  'Address Line 1',
+  'Address Line 2',
+  'City', 'State', 'ZIP Code', 'Country',
   'Notes',
 ];
 
@@ -199,15 +209,16 @@ export default function ImportModal({ type, fundId, onClose, onDone }: Props) {
           if (!name)       throw new Error('Investor Name is required');
           if (!commitment) throw new Error('Commitment Amount is required');
 
-          // Investing As = entity name (Institution/Family Office/Corporate)
-          const investingAs = String(row['Investing As'] || '').trim();
-          const lpType = investingAs
-            ? (['Institution','Family Office','Corporate'].includes(investingAs) ? investingAs : 'Individual')
-            : 'Individual';
+          // Investor Type column (Individual/Institution/Family Office/Corporate)
+          const rawType = String(row['Investor Type'] || row['Investing As'] || '').trim();
+          const lpType = ['Institution','Family Office','Corporate'].includes(rawType) ? rawType : 'Individual';
+
+          // Entity Name column
+          const entityName = String(row['Entity Name'] || '').trim();
 
           // Store entity name in notes if present
           const notesVal = [
-            investingAs && lpType !== 'Individual' ? `${lpType}: ${investingAs}` : '',
+            entityName && lpType !== 'Individual' ? `${lpType}: ${entityName}` : '',
             row['Notes'] || '',
           ].filter(Boolean).join(' | ') || null;
 

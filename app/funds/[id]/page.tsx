@@ -819,13 +819,13 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => {
-                    const headers = ['Investor Name*','Investing As','Commitment Amount*','Currency*','Called Capital','Distributions','Commitment Date','Email','Phone','GP Contact','Address Line 1','Address Line 2','City','State','ZIP Code','Country','Notes'];
+                    const headers = ['Investor Name*','Investor Type','Entity Name','Commitment Amount*','Currency*','Called Capital','Distributions','Commitment Date','Email','Phone','GP Contact','Address Line 1','Address Line 2','City','State','ZIP Code','Country','Notes'];
                     const rows = lps.map(lp => {
                       // Extract entity name from notes if present (stored as "Institution: Xyz" etc.)
                       const entityMatch = lp.notes?.match(/^(Institution|Family Office|Corporate):\s*([^\n|]+)/);
                       const investingAs = entityMatch ? entityMatch[2].trim() : (lp.type !== 'Individual' ? lp.type : '');
                       const cleanNotes = lp.notes?.replace(/^(Institution|Family Office|Corporate):[^\n|]+[\n|]?\s*/,'') || '';
-                      return [lp.name, investingAs, lp.commitment, 'USD', lp.called, lp.distributions, lp.join_date||'', lp.email||'', lp.phone||'', lp.gp_contact||'', lp.address_line1||'', lp.address_line2||'', lp.city||'', lp.state||'', lp.zip||'', lp.country||'', cleanNotes];
+                      return [lp.name, lp.type, investingAs, lp.commitment, 'USD', lp.called, lp.distributions, lp.join_date||'', lp.email||'', lp.phone||'', lp.gp_contact||'', lp.address_line1||'', lp.address_line2||'', lp.city||'', lp.state||'', lp.zip||'', lp.country||'', cleanNotes];
                     });
                     const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(','))].join('\n');
                     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = 'limited_partners.csv'; a.click();
