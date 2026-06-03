@@ -52,6 +52,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
   const [uploadForm, setUploadForm] = useState({ doc_type: 'Other', notes: '' });
   const [docSearch, setDocSearch] = useState('');
   const [docTypeFilter, setDocTypeFilter] = useState('All Types');
+  const [confirmDeleteDoc, setConfirmDeleteDoc] = useState<LPDoc | null>(null);
 
   const txnForm_placeholder = { date: '', amount: '', type: 'Capital Call', notes: '' };
   const [txnForm, setTxnForm] = useState(txnForm_placeholder);
@@ -126,9 +127,14 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
   };
 
   const handleDeleteDoc = async (doc: LPDoc) => {
-    if (!confirm(`Delete "${doc.name}"?`)) return;
-    await supabase.storage.from('lp-documents').remove([doc.file_path]);
-    await supabase.from('lp_documents').delete().eq('id', doc.id);
+    setConfirmDeleteDoc(doc);
+  };
+
+  const handleConfirmDeleteDoc = async () => {
+    if (!confirmDeleteDoc) return;
+    await supabase.storage.from('lp-documents').remove([confirmDeleteDoc.file_path]);
+    await supabase.from('lp_documents').delete().eq('id', confirmDeleteDoc.id);
+    setConfirmDeleteDoc(null);
     await loadDocs();
   };
 
