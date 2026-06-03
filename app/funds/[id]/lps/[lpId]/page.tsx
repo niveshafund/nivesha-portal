@@ -53,6 +53,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
   const [docSearch, setDocSearch] = useState('');
   const [docTypeFilter, setDocTypeFilter] = useState('All Types');
   const [confirmDeleteDoc, setConfirmDeleteDoc] = useState<LPDoc | null>(null);
+  const [dragOver, setDragOver] = useState(false);
 
   const txnForm_placeholder = { date: '', amount: '', type: 'Capital Call', notes: '' };
   const [txnForm, setTxnForm] = useState(txnForm_placeholder);
@@ -643,15 +644,24 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
                     className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3]" />
                 </div>
               </div>
-              <div className="border-2 border-dashed border-[#e8e6df] rounded-xl p-4 text-center mb-3 cursor-pointer hover:border-[#2d5be3] hover:bg-[#f0f4ff] transition-all"
-                onClick={() => document.getElementById('lp-doc-upload')?.click()}>
+              <div
+                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) setUploadFile(f); }}
+                onClick={() => document.getElementById('lp-doc-upload')?.click()}
+                className={`border-2 border-dashed rounded-xl p-6 text-center mb-3 cursor-pointer transition-all ${dragOver ? 'border-[#2d5be3] bg-[#eef2fd]' : uploadFile ? 'border-green-400 bg-green-50' : 'border-[#e8e6df] hover:border-[#2d5be3] hover:bg-[#f0f4ff]'}`}>
                 {uploadFile ? (
-                  <p className="text-[13px] text-[#2d5be3] font-medium">{uploadFile.name} ({formatFileSize(uploadFile.size)})</p>
+                  <div>
+                    <div className="text-[20px] mb-1">✅</div>
+                    <p className="text-[13px] text-green-700 font-medium">{uploadFile.name}</p>
+                    <p className="text-[11.5px] text-green-600">{formatFileSize(uploadFile.size)}</p>
+                  </div>
                 ) : (
-                  <>
-                    <p className="text-[13px] text-[#6b6860]">Click to select file</p>
+                  <div>
+                    <div className="text-[24px] mb-1">📂</div>
+                    <p className="text-[13px] font-medium text-[#3d3b35]">Drag &amp; drop a file here, or <span className="text-[#2d5be3]">browse</span></p>
                     <p className="text-[11.5px] text-[#9b9890] mt-0.5">PDF, Word, Excel, images supported</p>
-                  </>
+                  </div>
                 )}
                 <input id="lp-doc-upload" type="file" className="hidden"
                   onChange={e => setUploadFile(e.target.files?.[0] ?? null)} />
