@@ -71,6 +71,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
     companyValue: '',
     round: '',
     notes: '',
+    transaction_id: '',
   });
   const [savingVal, setSavingVal] = useState(false);
 
@@ -412,33 +413,43 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       const derivedQuarter = `Q${qNum} ${d.getFullYear()}`;
       const derivedQuarterEnd = QUARTER_END[derivedQuarter] ?? valForm.date;
 
-      // Auto-calculate MOIC = investment value / total invested
-      const newMoic = totalInvested > 0 ? newVal / totalInvested : 0;
+      // Find the selected transaction (or first investment if none selected)
+      const selectedTxn = valForm.transaction_id
+        ? investmentTxns.find(t => t.id === valForm.transaction_id)
+        : investmentTxns[0];
+      const txnAmount = selectedTxn?.amount ?? totalInvested;
 
-      // Auto-calculate IRR (CAGR)
-      const investDate = investmentTxns[0]?.date ? new Date(investmentTxns[0].date) : null;
+      // Auto-calculate MOIC = investment value / this transaction amount
+      const newMoic = txnAmount > 0 ? newVal / txnAmount : 0;
+
+      // Auto-calculate IRR (CAGR) based on selected transaction date
+      const investDate = selectedTxn?.date ? new Date(selectedTxn.date) : null;
       const valDate = new Date(valForm.date);
       const years = investDate ? (valDate.getTime() - investDate.getTime()) / (1000*60*60*24*365.25) : 0;
-      const newIrr = years > 0.01 && newVal > 0 && totalInvested > 0
-        ? ((newVal / totalInvested) ** (1/years) - 1) * 100 : 0;
+      const newIrr = years > 0.01 && newVal > 0 && txnAmount > 0
+        ? ((newVal / txnAmount) ** (1/years) - 1) * 100 : 0;
 
       await upsertValuation({
-        company_id:  companyId,
-        fund_id:     fundId,
-        quarter:     derivedQuarter,
-        quarter_end: derivedQuarterEnd,
-        value:       newVal,
-        moic:        newMoic,
-        irr:         newIrr,
-        round:       valForm.round || undefined,
-        notes:       valForm.notes ? `[${valForm.method}] ${valForm.notes}` : `[${valForm.method}]`,
+        company_id:    companyId,
+        fund_id:       fundId,
+        transaction_id: valForm.transaction_id || undefined,
+        quarter:       derivedQuarter,
+        quarter_end:   derivedQuarterEnd,
+        value:         newVal,
+        moic:          newMoic,
+        irr:           newIrr,
+        round:         valForm.round || undefined,
+        notes:         valForm.notes ? `[${valForm.method}] ${valForm.notes}` : `[${valForm.method}]`,
         ...(companyVal ? { company_value: companyVal } as any : {}),
       });
 
-      // Sync companies table
+      // Sync companies table with combined unrealised value
+      const allVals = await getValuationsByCompany(companyId);
+      const totalUnrealised = allVals.reduce((s, v) => s + v.value, 0);
+      const blendedMoic = totalInvested > 0 ? totalUnrealised / totalInvested : newMoic;
       await updateCompany(companyId, {
-        unrealised: newVal,
-        moic: newMoic,
+        unrealised: totalUnrealised,
+        moic: blendedMoic,
         irr: newIrr,
         ...(companyVal ? { valuation: companyVal } : {}),
       });
@@ -446,7 +457,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       const [v, co] = await Promise.all([getValuationsByCompany(companyId), getCompanyById(companyId)]);
       setVals(v);
       if (co) setCompany(co);
-      setValForm({ date: new Date().toISOString().split('T')[0], method: 'Recent Funding Round', investmentValue: '', companyValue: '', round: '', notes: '' });
+      setValForm({ date: new Date().toISOString().split('T')[0], method: 'Recent Funding Round', investmentValue: '', companyValue: '', round: '', notes: '', transaction_id: '' });
       setShowValForm(false);
     } catch (err: any) {
       alert('Failed to add valuation: ' + err.message);
@@ -1057,6 +1068,35 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                 <div className="flex-1 px-5 py-5">
                   <div className="text-[13.5px] font-semibold mb-4">New Valuation</div>
 
+                  {/* Transaction selector — only shown when multiple investments exist */}
+                  {investmentTxns.length > 1 && (
+                    <div className="mb-4 p-3 bg-[#eef2fd] border border-[#c7d7f9] rounded-xl">
+                      <label className="block text-[11.5px] font-medium mb-1 text-[#2d5be3]">
+                        Which investment are you valuing? *
+                      </label>
+                      <p className="text-[11px] text-[#6b6860] mb-2">
+                        This company has multiple investments — select the specific tranche.
+                      </p>
+                      <div className="flex flex-col gap-1.5">
+                        {investmentTxns.map(t => (
+                          <button key={t.id} type="button"
+                            onClick={() => setValForm(f => ({...f, transaction_id: t.id}))}
+                            className={'px-3 py-2 rounded-[7px] text-[12.5px] text-left border transition-all ' +
+                              (valForm.transaction_id === t.id
+                                ? 'bg-[#2d5be3] text-white border-[#2d5be3]'
+                                : 'bg-white text-[#1a1915] border-[#e8e6df] hover:border-[#2d5be3]')}>
+                            <span className="font-medium">${t.amount.toLocaleString()}</span>
+                            <span className="ml-2 opacity-75">{t.instrument} · {t.date}</span>
+                            {t.valuation_cap && <span className="ml-2 opacity-75">@ ${(t.valuation_cap/1_000_000).toFixed(0)}M cap</span>}
+                          </button>
+                        ))}
+                      </div>
+                      {!valForm.transaction_id && (
+                        <p className="text-[11px] text-amber-600 mt-1.5">Please select a transaction above</p>
+                      )}
+                    </div>
+                  )}
+
                   {/* Date + Method */}
                   <div className="grid grid-cols-2 gap-4 mb-4">
                     <div>
@@ -1133,7 +1173,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                   </div>
 
                   <div className="flex gap-2">
-                    <button onClick={handleAddValuation} disabled={savingVal || !valForm.investmentValue || !valForm.date}
+                    <button onClick={handleAddValuation} disabled={savingVal || !valForm.investmentValue || !valForm.date || (investmentTxns.length > 1 && !valForm.transaction_id)}
                       className="px-5 py-2 rounded-[7px] text-[13px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
                       {savingVal ? 'Saving...' : 'Create Valuation'}
                     </button>

@@ -713,12 +713,18 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
         const investmentTxns = txns.filter(t => t.type === 'Investment' && t.company_id).sort((a, b) => a.date.localeCompare(b.date));
         const distribByCompany = txns.filter(t => t.type === 'Distribution' && t.company_id).reduce<Record<string, number>>((acc, t) => { acc[t.company_id!] = (acc[t.company_id!] || 0) + t.amount; return acc; }, {});
         const companyMap = Object.fromEntries(companies.map(c => [c.id, c]));
+        // Build lookup by transaction_id first (new), fall back to company_id (legacy)
+        const latestValByTxn = valuations.reduce<Record<string, DbValuation>>((acc, v) => {
+          if ((v as any).transaction_id && !acc[(v as any).transaction_id]) acc[(v as any).transaction_id] = v;
+          return acc;
+        }, {});
         const latestValByCompany = valuations.reduce<Record<string, DbValuation>>((acc, v) => { if (v.company_id && !acc[v.company_id]) acc[v.company_id] = v; return acc; }, {});
         const sortedInvestmentTxns = [...investmentTxns].sort((a, b) => { const na = a.company_name.toLowerCase(), nb = b.company_name.toLowerCase(); return na !== nb ? na.localeCompare(nb) : a.date.localeCompare(b.date); });
         const rows = sortedInvestmentTxns.map(t => {
           const co = companyMap[t.company_id!];
           const entryVal = t.valuation_cap ?? null;
-          const latestVal = t.company_id ? latestValByCompany[t.company_id] : null;
+          // Prefer transaction-level valuation, fall back to company-level
+          const latestVal = latestValByTxn[t.id] ?? (t.company_id ? latestValByCompany[t.company_id] : null);
           const currentCoVal = (latestVal as any)?.company_value ?? co?.valuation ?? entryVal ?? 0;
           // Calculate current investment value based on ownership % at entry
           // ownership = amount invested / entry valuation cap

@@ -130,6 +130,7 @@ export type DbValuation = {
   id: string;
   company_id: string;
   fund_id: string;
+  transaction_id?: string;
   quarter: string;
   quarter_end: string;
   value: number;
@@ -476,9 +477,14 @@ export async function getValuationsByFund(fundId: string): Promise<DbValuation[]
 export async function upsertValuation(
   valuation: Omit<DbValuation, 'id' | 'created_at'>
 ): Promise<DbValuation> {
+  // Use transaction_id+quarter conflict when transaction_id is present
+  // Fall back to company_id+quarter for legacy rows
+  const conflictKey = valuation.transaction_id
+    ? 'transaction_id,quarter'
+    : 'company_id,quarter';
   const { data, error } = await supabase
     .from('valuations')
-    .upsert(valuation, { onConflict: 'company_id,quarter' })
+    .upsert(valuation, { onConflict: conflictKey })
     .select()
     .single();
   if (error) throw error;
