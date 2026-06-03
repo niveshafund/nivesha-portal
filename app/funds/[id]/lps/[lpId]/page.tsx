@@ -446,11 +446,12 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
                 { label: 'Email',      value: lp.email || '—' },
                 { label: 'Phone',      value: lp.phone || '—' },
                 { label: 'Type',       value: lp.type },
+                { label: 'Entity Name', value: (() => { const m = lp.notes?.match(/^(Institution|Family Office|Corporate):\s*([^\n|]+)/); return m ? m[2].trim() : '—'; })() },
                 { label: 'Commitment', value: fmtFull(lp.commitment) },
                 { label: 'Join Date',  value: lp.join_date || '—' },
                 { label: 'Address',    value: [lp.address_line1, lp.address_line2, lp.city, lp.state, lp.zip, lp.country].filter(Boolean).join(', ') || '—' },
                 { label: 'GP Contact', value: lp.gp_contact || '—' },
-                { label: 'Notes',      value: lp.notes || '—' },
+                { label: 'Notes',      value: lp.notes?.replace(/^(Institution|Family Office|Corporate):[^\n|]+[\n|]?\s*/, '') || '—' },
               ].map(row => (
                 <div key={row.label} className="border-b border-[#f0f0ed] pb-3">
                   <div className="text-[11.5px] text-[#9b9890] mb-0.5">{row.label}</div>

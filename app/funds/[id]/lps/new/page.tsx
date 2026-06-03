@@ -58,10 +58,10 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
       const totalCommitted = existingLPs.reduce((s, lp) => s + lp.commitment, 0) + Number(form.commitment);
       const ownershipPct = totalCommitted > 0 ? (Number(form.commitment) / totalCommitted) * 100 : 0;
 
-      // For entities, the LP name = entity name; contact person goes in notes
-      const displayName = isEntity(form.type) ? form.entityName.trim() : form.name.trim();
-      const notesWithContact = isEntity(form.type) && form.name.trim()
-        ? `Contact: ${form.name.trim()}${form.notes ? '\n' + form.notes : ''}`
+      
+      const displayName = form.name.trim();
+      const notesWithContact = isEntity(form.type) && form.entityName.trim()
+        ? `${form.type}: ${form.entityName.trim()}${form.notes ? '\n' + form.notes : ''}`
         : form.notes;
 
       await createLP({
