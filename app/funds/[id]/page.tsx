@@ -719,8 +719,19 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
           const co = companyMap[t.company_id!];
           const entryVal = t.valuation_cap ?? null;
           const latestVal = t.company_id ? latestValByCompany[t.company_id] : null;
-          const currentInvValue = latestVal?.value ?? t.amount;
           const currentCoVal = (latestVal as any)?.company_value ?? co?.valuation ?? entryVal ?? 0;
+          // Calculate current investment value based on ownership % at entry
+          // ownership = amount invested / entry valuation cap
+          // current value = ownership % * current company valuation
+          const currentInvValue = (() => {
+            if (entryVal && entryVal > 0 && currentCoVal > 0) {
+              const ownershipPct = t.amount / entryVal;
+              return ownershipPct * currentCoVal;
+            }
+            // Fallback: use latest valuation value proportionally if multiple investments
+            if (latestVal?.value && latestVal.value > 0) return latestVal.value;
+            return t.amount;
+          })();
           const distribAmt = distribByCompany[t.company_id!] ?? 0;
           const moic = currentInvValue > 0 && t.amount > 0 ? currentInvValue / t.amount : null;
           const dpi = t.amount > 0 && distribAmt > 0 ? distribAmt / t.amount : null;
