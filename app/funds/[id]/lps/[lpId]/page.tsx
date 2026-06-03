@@ -735,6 +735,28 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
         </div>
       )}
 
+      {confirmDeleteDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setConfirmDeleteDoc(null)} />
+          <div className="relative bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
+            <div className="text-[15px] font-semibold mb-2">Delete document?</div>
+            <p className="text-[13px] text-[#6b6860] mb-5">
+              Are you sure you want to delete <strong>{confirmDeleteDoc.name}</strong>? This cannot be undone.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmDeleteDoc(null)}
+                className="px-4 py-2 rounded-[7px] text-[13px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleConfirmDeleteDoc}
+                className="px-4 py-2 rounded-[7px] text-[13px] font-medium bg-red-500 text-white hover:bg-red-600 transition-colors">
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
