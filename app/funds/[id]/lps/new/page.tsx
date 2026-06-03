@@ -142,9 +142,8 @@ export default function AddLPPage({ params }: { params: Promise<{ id: string }> 
         {/* Contact / Investor name */}
         <div className="mb-5">
           <label className="block text-[13px] font-medium mb-1">
-            {isEntity(form.type) ? 'Contact Person Name' : 'Investor Name'} <span className="text-red-500">*</span>
+            Investor Name <span className="text-red-500">*</span>
           </label>
-          {isEntity(form.type) && <p className="text-[12px] text-[#6b6860] mb-2">Primary contact at this {form.type.toLowerCase()}</p>}
           <input type="text" value={form.name} onChange={set('name')} placeholder="e.g., Sunil Potti" className={inputCls('name')} />
           {errors.name && <p className="text-[11px] text-red-500 mt-1">{errors.name}</p>}
         </div>
