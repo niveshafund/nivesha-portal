@@ -32,10 +32,9 @@ type LPRowMenuProps = {
   lp: DbLP;
   fundId: string;
   onInvite: (lp: DbLP) => void;
-  onImpersonate: (lp: DbLP) => void;
 };
 
-function LPRowMenu({ lp, fundId, onInvite, onImpersonate }: LPRowMenuProps) {
+function LPRowMenu({ lp, fundId, onInvite }: LPRowMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -73,20 +72,6 @@ function LPRowMenu({ lp, fundId, onInvite, onImpersonate }: LPRowMenuProps) {
             Edit
           </a>
 
-          {/* Add Contact */}
-          <a
-            href={`/contacts?prefill=${encodeURIComponent(lp.name)}`}
-            className="flex items-center gap-2.5 px-3 py-2 hover:bg-[#f9f8f5] transition-colors text-[#1a1915]"
-            onClick={() => setOpen(false)}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} className="w-4 h-4 text-[#6b6860]">
-              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-              <circle cx="9" cy="7" r="4"/>
-              <line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/>
-            </svg>
-            Add Contact
-          </a>
-
           <div className="border-t border-[#f0efe9] my-1" />
 
           {/* Invite to Portal */}
@@ -101,18 +86,6 @@ function LPRowMenu({ lp, fundId, onInvite, onImpersonate }: LPRowMenuProps) {
             Invite to Portal
           </button>
 
-          {/* Login as User */}
-          <button
-            onClick={() => { setOpen(false); onImpersonate(lp); }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-[#f9f8f5] transition-colors text-[#1a1915]"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} className="w-4 h-4 text-[#6b6860]">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-              <circle cx="12" cy="7" r="4"/>
-              <path d="M17 11l2 2 4-4" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            Login as User
-          </button>
         </div>
       )}
     </div>
@@ -244,98 +217,6 @@ function InviteModal({ lp, onClose }: { lp: DbLP; onClose: () => void }) {
   );
 }
 
-// ── Impersonate Modal ─────────────────────────────────────────
-function ImpersonateModal({ lp, onClose }: { lp: DbLP; onClose: () => void }) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState<string | null>(null);
-  const email = lp.email ?? '';
-
-  async function handleLogin() {
-    if (!email) { setError('This LP has no email address.'); return; }
-    setLoading(true); setError(null);
-    try {
-      const res = await fetch('/api/impersonate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'Failed to generate login link');
-      // Open in new tab — GP stays logged in their own session
-      window.open(json.url, '_blank', 'noopener,noreferrer');
-      onClose();
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl border border-[#e8e6df] shadow-xl w-full max-w-md mx-4 p-6">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth={1.75} className="w-5 h-5">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-              <circle cx="12" cy="7" r="4"/>
-            </svg>
-          </div>
-          <div>
-            <div className="text-[15px] font-semibold">Login as {lp.name}</div>
-            <div className="text-[12px] text-[#9b9890]">Preview their LP portal experience</div>
-          </div>
-        </div>
-
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5">
-          <div className="flex gap-2.5">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth={2} className="w-4 h-4 mt-0.5 flex-shrink-0">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="12" y1="8" x2="12" y2="12"/>
-              <line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-            <div className="text-[12px] text-amber-800">
-              This opens a <strong>new tab</strong> logged in as {lp.name}. Your current GP session is unaffected. Close the tab when done previewing.
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-[#f9f8f5] rounded-xl p-4 mb-5 space-y-2">
-          <div className="flex justify-between text-[12.5px]">
-            <span className="text-[#9b9890]">Logging in as</span>
-            <span className="font-medium">{lp.name}</span>
-          </div>
-          <div className="flex justify-between text-[12.5px]">
-            <span className="text-[#9b9890]">Email</span>
-            <span className="font-mono">{email || <span className="text-red-500 font-sans">No email on record</span>}</span>
-          </div>
-        </div>
-
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-[12px] text-red-700 mb-4">
-            ⚠️ {error}
-          </div>
-        )}
-
-        <div className="flex gap-2">
-          <button
-            onClick={handleLogin}
-            disabled={loading || !email}
-            className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white text-[13px] font-medium hover:bg-amber-600 disabled:opacity-50 transition-colors"
-          >
-            {loading ? 'Generating link…' : 'Open as LP →'}
-          </button>
-          <button
-            onClick={onClose}
-            className="px-4 py-2.5 rounded-xl border border-[#e8e6df] text-[13px] font-medium hover:bg-[#f9f8f5] transition-colors"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Option A: One row per company, round pills inline ────────
 type GroupedTxnProps = {
@@ -550,7 +431,6 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const [loading, setLoading] = useState(true);
   // LP onboarding modals
   const [inviteLP, setInviteLP]           = useState<DbLP | null>(null);
-  const [impersonateLP, setImpersonateLP] = useState<DbLP | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -604,7 +484,6 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
     <div>
       {/* Modals */}
       {inviteLP      && <InviteModal      lp={inviteLP}      onClose={() => setInviteLP(null)} />}
-      {impersonateLP && <ImpersonateModal lp={impersonateLP} onClose={() => setImpersonateLP(null)} />}
 
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-1">
@@ -935,7 +814,6 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                             lp={lp}
                             fundId={id}
                             onInvite={setInviteLP}
-                            onImpersonate={setImpersonateLP}
                           />
                         </td>
                       </tr>
