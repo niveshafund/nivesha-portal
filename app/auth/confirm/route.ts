@@ -12,15 +12,11 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const token_hash = searchParams.get('token_hash');
   const type       = searchParams.get('type') as EmailOtpType | null;
-  const next       = searchParams.get('next'); // explicit override only — don't default yet
-
-  if (!token_hash || !type) {
-    return NextResponse.redirect(new URL('/login?error=invalid_hash', request.url));
-  }
+  const next       = searchParams.get('next');
 
   const cookieStore = await cookies();
 
-  // Placeholder redirect — will be replaced below once we know the user's role
+  // Placeholder redirect — location header will be overwritten below
   const response = NextResponse.redirect(new URL('/', request.url));
 
   const supabase = createServerClient(
@@ -34,7 +30,6 @@ export async function GET(request: NextRequest) {
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
             const cookieOptions = { ...options, path: '/' };
-            // Write to both Next.js internals AND the outgoing response headers
             cookieStore.set(name, value, cookieOptions);
             response.cookies.set(name, value, cookieOptions);
           });
@@ -43,34 +38,57 @@ export async function GET(request: NextRequest) {
     }
   );
 
-  const { data: { user }, error } = await supabase.auth.verifyOtp({ type, token_hash });
+  // ── Path A: token_hash present — we verify the OTP ourselves ──
+  // This is the standard magic-link flow where Supabase passes the
+  // token to us rather than verifying it on their server first.
+  if (token_hash && type) {
+    const { data: { user }, error } = await supabase.auth.verifyOtp({ type, token_hash });
 
-  if (error || !user) {
-    console.error('[confirm] verifyOtp error:', error?.message);
-    return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent(error?.message ?? 'unknown')}`, request.url)
-    );
+    if (error || !user) {
+      console.error('[confirm] verifyOtp error:', error?.message);
+      return NextResponse.redirect(
+        new URL(`/login?error=${encodeURIComponent(error?.message ?? 'unknown')}`, request.url)
+      );
+    }
+
+    console.log(`[confirm] OTP verified (type=${type}), user=${user.id}`);
+
+    if (type === 'invite' && user.email) {
+      await hydratRoleFromPendingInvite(user.id, user.email);
+    }
+
+    const destination = next ?? await resolveRoleRedirect(user.id);
+    response.headers.set('location', new URL(destination, request.url).toString());
+    return response;
   }
 
-  console.log(`[confirm] OTP verified (type=${type}), user=${user.id}`);
+  // ── Path B: no token_hash — Supabase already verified on their end ──
+  // The invite link format is:
+  //   supabase.co/auth/v1/verify?token=...&type=invite&redirect_to=.../auth/confirm
+  // Supabase verifies the token, sets the session cookie, then redirects here.
+  // By this point the user is already authenticated — just read the session.
+  const { data: { user } } = await supabase.auth.getUser();
 
-  // For invite links: hydrate user_roles from pending_invites so the
-  // middleware can route the user correctly on their very first load.
+  if (!user) {
+    console.error('[confirm] Path B: no user found after Supabase redirect');
+    return NextResponse.redirect(new URL('/login?error=no_session', request.url));
+  }
+
+  console.log(`[confirm] Path B: session already set by Supabase, user=${user.id}`);
+
+  // Still need to hydrate role — type param is present in the redirect URL
+  // even in Path B, so we can detect invite links
   if (type === 'invite' && user.email) {
     await hydratRoleFromPendingInvite(user.id, user.email);
   }
 
-  // Determine where to send the user
   const destination = next ?? await resolveRoleRedirect(user.id);
-
-  // Mutate the redirect URL on the already-cookie-carrying response object
   response.headers.set('location', new URL(destination, request.url).toString());
-
   return response;
 }
 
 // ─────────────────────────────────────────────────────────────
-// Helpers (use service-role so RLS doesn't interfere)
+// Helpers
 // ─────────────────────────────────────────────────────────────
 
 function adminClient() {
@@ -81,9 +99,6 @@ function adminClient() {
   );
 }
 
-/**
- * Returns the correct landing path based on the user's role.
- */
 async function resolveRoleRedirect(userId: string): Promise<string> {
   const { data } = await adminClient()
     .from('user_roles')
@@ -97,17 +112,13 @@ async function resolveRoleRedirect(userId: string): Promise<string> {
   return '/';
 }
 
-/**
- * Copies the pending_invites row into user_roles on first sign-in, then
- * deletes the pending row. Safe to call multiple times (upsert + delete).
- */
 async function hydratRoleFromPendingInvite(userId: string, email: string) {
   const admin = adminClient();
   const normalizedEmail = email.trim().toLowerCase();
 
   const { data: invite, error: fetchErr } = await admin
     .from('pending_invites')
-    .select('role, full_name')
+    .select('role, full_name, invited_by')
     .eq('email', normalizedEmail)
     .single();
 
@@ -118,11 +129,12 @@ async function hydratRoleFromPendingInvite(userId: string, email: string) {
 
   const { error: upsertErr } = await admin.from('user_roles').upsert(
     {
-      user_id:   userId,
-      role:      invite.role,
-      full_name: invite.full_name ?? null,
-      email:     normalizedEmail,
-      is_active: true,
+      user_id:    userId,
+      role:       invite.role,
+      full_name:  invite.full_name ?? null,
+      email:      normalizedEmail,
+      is_active:  true,
+      invited_by: invite.invited_by ?? null,
     },
     { onConflict: 'user_id' }
   );
@@ -132,8 +144,6 @@ async function hydratRoleFromPendingInvite(userId: string, email: string) {
     return;
   }
 
-  // Clean up so the row can't be replayed
   await admin.from('pending_invites').delete().eq('email', normalizedEmail);
-
   console.log(`[confirm] Role '${invite.role}' assigned to ${userId}`);
 }
