@@ -5,9 +5,16 @@ import { useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
+// Errors that are internal/misleading and should never be shown to users
+const SUPPRESS_ERRORS = ['invalid_hash', 'no_code', 'no_session'];
+
 function LoginForm() {
   const searchParams = useSearchParams();
-  const authError = searchParams.get('error');
+  const rawError = searchParams.get('error');
+  const authError = rawError && !SUPPRESS_ERRORS.includes(rawError)
+    ? decodeURIComponent(rawError)
+    : null;
+
   const [email,   setEmail]   = useState('');
   const [sent,    setSent]    = useState(false);
   const [loading, setLoading] = useState(false);
@@ -18,12 +25,10 @@ function LoginForm() {
     if (!email.trim()) return;
     setLoading(true);
     setError('');
-    // 1. Get the domain (e.g., https://portal.niveshaventures.com)
     const baseUrl = window.location.origin;
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
       options: {
-       // 2. Explicitly point to the /auth/confirm path
         emailRedirectTo: `${baseUrl}/auth/confirm`,
       },
     });
@@ -74,9 +79,7 @@ function LoginForm() {
               />
             </div>
             {authError && (
-              <p className="text-[11.5px] text-red-500 mb-3">
-                {decodeURIComponent(authError)}
-              </p>
+              <p className="text-[11.5px] text-red-500 mb-3">{authError}</p>
             )}
             {error && <p className="text-[11.5px] text-red-500 mb-3">{error}</p>}
             <button type="submit" disabled={loading || !email.trim()}

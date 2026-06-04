@@ -200,18 +200,31 @@ export default function UsersPage() {
   }
 
   async function handleDelete(m: TeamMember) {
-    await supabase.from('user_roles').delete().eq('id', m.id);
-    setConfirmDelete(null);
-    await loadData();
+    try {
+      const res = await fetch(`/api/users/${m.user_id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json();
+        setSuccessMsg(''); // clear any prior success
+        alert(data.error || 'Failed to delete user');
+        return;
+      }
+      setSuccessMsg(`${m.full_name ?? 'User'} has been deleted.`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch {
+      alert('Failed to delete user');
+    } finally {
+      setConfirmDelete(null);
+      await loadData();
+    }
   }
 
-  async function handleResend(email: string) {
+  async function handleResend(email: string, role?: AppRole) {
     if (!email) { setSuccessMsg('No email found for this user — they may need to be re-invited manually.'); setTimeout(() => setSuccessMsg(''), 5000); return; }
     try {
       const res = await fetch('/api/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, full_name: null, role: 'Viewer' }),
+        body: JSON.stringify({ email, full_name: null, role: role ?? 'Viewer' }),
       });
       if (res.ok) {
         setSuccessMsg(`Magic link resent to ${email}`);
@@ -376,7 +389,7 @@ export default function UsersPage() {
                     canManage={!!can.manageTeam(role)}
                     onChangeRole={() => { setEditingId(m.id); setEditRole(m.role); }}
                     onDeactivate={() => handleDeactivate(m)}
-                    onResend={() => handleResend(m.email ?? '')}
+                    onResend={() => handleResend(m.email ?? '', m.role)}
                     onDelete={() => setConfirmDelete(m)}
                   />
                 </td>
@@ -429,7 +442,7 @@ export default function UsersPage() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-3">
-                      <button onClick={() => handleResend(inv.email)}
+                      <button onClick={() => handleResend(inv.email, inv.role)}
                         className="text-[12px] text-[#2d5be3] hover:underline">Resend</button>
                       <button onClick={() => handleRevokeInvite(inv.id)}
                         className="text-[12px] text-red-500 hover:underline">Revoke</button>
