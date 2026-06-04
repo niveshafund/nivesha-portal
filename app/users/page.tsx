@@ -134,6 +134,7 @@ export default function UsersPage() {
   const { role: rawRole, user } = useAuth();
   const role = rawRole ?? undefined;
   const [members, setMembers]         = useState<TeamMember[]>([]);
+  const [lpMembers, setLpMembers]     = useState<TeamMember[]>([]);
   const [invites, setInvites]         = useState<PendingInvite[]>([]);
   const [loading, setLoading]         = useState(true);
   const [showInvite, setShowInvite]   = useState(false);
@@ -175,7 +176,11 @@ export default function UsersPage() {
 
     const enriched: TeamMember[] = (roles ?? []).map((r: any) => ({ ...r, pending: false }));
 
-    setMembers([...enriched, ...pendingRows]);
+    // Pending rows from pending_invites (not yet in user_roles)
+    const allMembers = [...enriched, ...pendingRows];
+
+    setMembers(allMembers.filter(m => m.role !== 'LP'));
+    setLpMembers(allMembers.filter(m => m.role === 'LP'));
     setInvites((inv ?? []) as PendingInvite[]);
     setLoading(false);
   }
@@ -325,7 +330,7 @@ export default function UsersPage() {
               <select value={inviteForm.role}
                 onChange={e => setInviteForm(f => ({...f, role: e.target.value as AppRole}))}
                 className={inputCls}>
-                {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                {ALL_ROLES.filter(r => r !== 'LP').map(r => <option key={r} value={r}>{r}</option>)}
               </select>
               <p className="text-[11px] text-[#9b9890] mt-1">{ROLE_META[inviteForm.role].description}</p>
             </div>
@@ -360,7 +365,7 @@ export default function UsersPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-[#e8e6df]">
-            {members.map(m => (
+            {members.filter(m => m.role !== 'LP').map(m => (
               <tr key={m.id} className="hover:bg-[#fafaf8] transition-colors">
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
@@ -413,6 +418,86 @@ export default function UsersPage() {
                     onDelete={() => setConfirmDelete(m)}
                     onRevoke={() => handleRevokeInvite(m.id)}
                   />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Limited Partners */}
+      <div className="bg-white border border-[#e8e6df] rounded-xl overflow-hidden mb-5">
+        <div className="px-6 py-4 border-b border-[#e8e6df] flex items-center justify-between">
+          <div>
+            <div className="text-[15px] font-semibold">Limited Partners</div>
+            <p className="text-[12px] text-[#9b9890] mt-0.5">LP portal access — invite from Contacts & LPs page.</p>
+          </div>
+          <span className="text-[12px] text-[#9b9890]">{lpMembers.length} LP{lpMembers.length !== 1 ? 's' : ''}</span>
+        </div>
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-[#e8e6df]">
+              {['LP','STATUS','ACTIONS'].map(h => (
+                <th key={h} className="text-left text-[10.5px] font-semibold text-[#9b9890] tracking-wide px-6 py-3">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#e8e6df]">
+            {lpMembers.length === 0 ? (
+              <tr><td colSpan={3} className="px-6 py-8 text-center text-[12.5px] text-[#9b9890]">
+                No LPs invited yet. Invite them from the Contacts & LPs page.
+              </td></tr>
+            ) : lpMembers.map(m => (
+              <tr key={m.id} className="hover:bg-[#fafaf8] transition-colors">
+                <td className="px-6 py-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
+                      style={{ backgroundColor: avatarBg(m.user_id) }}>
+                      {initials(m.full_name)}
+                    </div>
+                    <div>
+                      <div className="text-[13.5px] font-medium text-[#1a1915]">{m.full_name ?? m.email?.split('@')[0] ?? 'Unknown'}</div>
+                      <div className="text-[12px] text-[#9b9890]">{m.email ?? m.user_id.slice(0, 8) + '…'}</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-6 py-4">
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium ${
+                    m.pending
+                      ? 'bg-amber-50 text-amber-600'
+                      : m.is_active
+                        ? 'bg-green-50 text-green-700'
+                        : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-3 h-3">
+                      {m.pending
+                        ? <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        : m.is_active
+                          ? <polyline points="20 6 9 17 4 12"/>
+                          : <line x1="18" y1="6" x2="6" y2="18"/>
+                      }
+                    </svg>
+                    {m.pending ? 'Pending' : m.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </td>
+                <td className="px-6 py-4">
+                  {can.manageTeam(role) && (
+                    <div className="flex items-center gap-3">
+                      {m.pending ? (
+                        <>
+                          <button onClick={() => handleResend(m.email ?? '', m.role)}
+                            className="text-[12px] text-[#2d5be3] hover:underline">Resend</button>
+                          <button onClick={() => handleRevokeInvite(m.id)}
+                            className="text-[12px] text-red-500 hover:underline">Revoke</button>
+                        </>
+                      ) : (
+                        <button onClick={() => handleDeactivate(m)}
+                          className={`text-[12px] hover:underline ${m.is_active ? 'text-amber-600' : 'text-green-600'}`}>
+                          {m.is_active ? 'Deactivate' : 'Reactivate'}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
