@@ -15,6 +15,7 @@ type TeamMember = {
   role: AppRole;
   is_active: boolean;
   created_at: string;
+  pending?: boolean;
 };
 
 type PendingInvite = {
@@ -29,11 +30,11 @@ const inputCls = 'w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[1
 
 function ActionsMenu({
   member, isSelf, canManage,
-  onChangeRole, onDeactivate, onResend, onDelete,
+  onChangeRole, onDeactivate, onResend, onDelete, onRevoke,
 }: {
   member: TeamMember; isSelf: boolean; canManage: boolean;
   onChangeRole: () => void; onDeactivate: () => void;
-  onResend: () => void; onDelete: () => void;
+  onResend: () => void; onDelete: () => void; onRevoke: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, right: 0 });
@@ -64,6 +65,16 @@ function ActionsMenu({
   if (!canManage || isSelf) return (
     <span className="text-[11.5px] text-[#9b9890]">{isSelf ? 'You' : ''}</span>
   );
+
+  // Pending invite — only resend + revoke
+  if (member.pending) {
+    return (
+      <div className="flex items-center justify-end gap-3">
+        <button onClick={onResend} className="text-[12px] text-[#2d5be3] hover:underline">Resend</button>
+        <button onClick={onRevoke} className="text-[12px] text-red-500 hover:underline">Revoke</button>
+      </div>
+    );
+  }
 
   const menu = open && (
     <div
@@ -143,20 +154,26 @@ export default function UsersPage() {
       supabase.from('pending_invites').select('*').is('accepted_at', null).order('created_at', { ascending: false }),
     ]);
 
-    // Enrich members with email from auth.users via RPC or admin — fall back to pending_invites email match
-    const inviteEmailMap: Record<string, string> = {};
-    (inv ?? []).forEach((i: any) => { if (i.email) inviteEmailMap[i.email] = i.email; });
+    // Build a set of emails already in user_roles so we don't double-show
+    const activeEmails = new Set((roles ?? []).map((r: any) => r.email?.toLowerCase()).filter(Boolean));
 
-    // Try to get emails from pending_invites by matching user_id if available
-    const enriched = (roles ?? []).map((r: any) => {
-      // Check if there's a pending invite with matching email
-      const matchedInvite = (inv ?? []).find((i: any) =>
-        i.full_name === r.full_name && i.role === r.role
-      );
-      return { ...r, email: matchedInvite?.email ?? r.email ?? null };
-    });
+    // Convert pending_invites into synthetic TeamMember rows with status 'pending'
+    const pendingRows: TeamMember[] = ((inv ?? []) as PendingInvite[])
+      .filter((i) => !activeEmails.has(i.email?.toLowerCase()))
+      .map((i) => ({
+        id:         i.id,
+        user_id:    i.id,           // no real user_id yet — use invite id as key
+        full_name:  i.full_name,
+        email:      i.email,
+        role:       i.role,
+        is_active:  false,
+        created_at: i.created_at,
+        pending:    true,           // flag for UI
+      }));
 
-    setMembers(enriched as TeamMember[]);
+    const enriched: TeamMember[] = (roles ?? []).map((r: any) => ({ ...r, pending: false }));
+
+    setMembers([...enriched, ...pendingRows]);
     setInvites((inv ?? []) as PendingInvite[]);
     setLoading(false);
   }
@@ -200,31 +217,18 @@ export default function UsersPage() {
   }
 
   async function handleDelete(m: TeamMember) {
-    try {
-      const res = await fetch(`/api/users/${m.user_id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        const data = await res.json();
-        setSuccessMsg(''); // clear any prior success
-        alert(data.error || 'Failed to delete user');
-        return;
-      }
-      setSuccessMsg(`${m.full_name ?? 'User'} has been deleted.`);
-      setTimeout(() => setSuccessMsg(''), 4000);
-    } catch {
-      alert('Failed to delete user');
-    } finally {
-      setConfirmDelete(null);
-      await loadData();
-    }
+    await supabase.from('user_roles').delete().eq('id', m.id);
+    setConfirmDelete(null);
+    await loadData();
   }
 
-  async function handleResend(email: string, role?: AppRole) {
+  async function handleResend(email: string) {
     if (!email) { setSuccessMsg('No email found for this user — they may need to be re-invited manually.'); setTimeout(() => setSuccessMsg(''), 5000); return; }
     try {
       const res = await fetch('/api/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, full_name: null, role: role ?? 'Viewer' }),
+        body: JSON.stringify({ email, full_name: null, role: 'Viewer' }),
       });
       if (res.ok) {
         setSuccessMsg(`Magic link resent to ${email}`);
@@ -347,8 +351,8 @@ export default function UsersPage() {
                       {initials(m.full_name)}
                     </div>
                     <div>
-                      <div className="text-[13.5px] font-medium text-[#1a1915]">{m.full_name ?? 'Unknown'}</div>
-                      <div className="text-[12px] text-[#9b9890]">{m.user_id.slice(0, 8)}…</div>
+                      <div className="text-[13.5px] font-medium text-[#1a1915]">{m.full_name ?? m.email?.split('@')[0] ?? 'Unknown'}</div>
+                      <div className="text-[12px] text-[#9b9890]">{m.pending ? m.email : m.user_id.slice(0, 8) + '…'}</div>
                     </div>
                   </div>
                 </td>
@@ -375,11 +379,22 @@ export default function UsersPage() {
                   )}
                 </td>
                 <td className="px-6 py-4">
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium ${m.is_active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium ${
+                    m.pending
+                      ? 'bg-amber-50 text-amber-600'
+                      : m.is_active
+                        ? 'bg-green-50 text-green-700'
+                        : 'bg-gray-100 text-gray-500'
+                  }`}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-3 h-3">
-                      {m.is_active ? <polyline points="20 6 9 17 4 12"/> : <line x1="18" y1="6" x2="6" y2="18"/>}
+                      {m.pending
+                        ? <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        : m.is_active
+                          ? <polyline points="20 6 9 17 4 12"/>
+                          : <line x1="18" y1="6" x2="6" y2="18"/>
+                      }
                     </svg>
-                    {m.is_active ? 'Active' : 'Inactive'}
+                    {m.pending ? 'Pending' : m.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
                 <td className="px-6 py-4">
@@ -391,6 +406,7 @@ export default function UsersPage() {
                     onDeactivate={() => handleDeactivate(m)}
                     onResend={() => handleResend(m.email ?? '', m.role)}
                     onDelete={() => setConfirmDelete(m)}
+                    onRevoke={() => handleRevokeInvite(m.id)}
                   />
                 </td>
               </tr>
@@ -398,62 +414,6 @@ export default function UsersPage() {
           </tbody>
         </table>
       </div>
-
-      {/* Pending Invites */}
-      {invites.length > 0 && (
-        <div className="bg-white border border-[#e8e6df] rounded-xl overflow-hidden mb-5">
-          <div className="px-6 py-4 border-b border-[#e8e6df]">
-            <div className="text-[15px] font-semibold">Pending Invitations</div>
-            <p className="text-[12px] text-[#9b9890] mt-0.5">{invites.length} invitation{invites.length !== 1 ? 's' : ''} awaiting acceptance</p>
-          </div>
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-[#e8e6df]">
-                {['USER','ROLE','SENT','ACTIONS'].map(h => (
-                  <th key={h} className={`text-left text-[10.5px] font-semibold text-[#9b9890] tracking-wide px-6 py-3 ${h === 'ACTIONS' ? 'text-right' : ''}`}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#e8e6df]">
-              {invites.map(inv => (
-                <tr key={inv.id} className="hover:bg-[#fafaf8] transition-colors">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-[#f0efe9] flex items-center justify-center text-[#9b9890] text-[11px] font-bold flex-shrink-0">
-                        {initials(inv.full_name ?? inv.email.split('@')[0])}
-                      </div>
-                      <div>
-                        <div className="text-[13.5px] font-medium text-[#1a1915]">{inv.full_name ?? inv.email.split('@')[0]}</div>
-                        <div className="text-[12px] text-[#9b9890]">{inv.email}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                        className="w-3.5 h-3.5 text-amber-500">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                      </svg>
-                      <span className="text-[13.5px] text-[#1a1915]">{inv.role}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-[12px] text-[#9b9890]">
-                    {new Date(inv.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex items-center justify-end gap-3">
-                      <button onClick={() => handleResend(inv.email, inv.role)}
-                        className="text-[12px] text-[#2d5be3] hover:underline">Resend</button>
-                      <button onClick={() => handleRevokeInvite(inv.id)}
-                        className="text-[12px] text-red-500 hover:underline">Revoke</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
 
       {/* Roles Reference */}
       <div className="bg-white border border-[#e8e6df] rounded-xl p-6">
