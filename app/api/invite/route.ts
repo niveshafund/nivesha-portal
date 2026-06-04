@@ -46,22 +46,35 @@ export async function POST(request: Request) {
 
   const normalizedEmail = email.trim().toLowerCase();
 
-  // Check if user already exists — if so, just ensure their role is correct.
-  // They don't need a new invite; they can log in directly via the login page.
+  // Check if user already exists in auth.users
   const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
   const existingUser = existingUsers?.users?.find(u => u.email === normalizedEmail);
 
   if (existingUser) {
-    // Upsert their role so they land on the right portal
-    await supabaseAdmin.from('user_roles').upsert({
-      user_id:   existingUser.id,
+    // User exists in auth — upsert user_roles with is_active: false
+    // They are NOT active until they log in via magic link
+    const { error: upsertErr } = await supabaseAdmin.from('user_roles').upsert({
+      user_id:    existingUser.id,
       role,
-      full_name: full_name?.trim() || existingUser.user_metadata?.full_name || null,
-      email:     normalizedEmail,
-      is_active: true,
+      full_name:  full_name?.trim() || existingUser.user_metadata?.full_name || null,
+      email:      normalizedEmail,
+      is_active:  false,          // ← inactive until first login
+      invited_by: user.id,
     }, { onConflict: 'user_id' });
 
-    // Return a specific flag so the UI can show the right message
+    if (upsertErr) {
+      console.error('[invite] Failed to upsert user_roles for existing user:', upsertErr.message);
+      return NextResponse.json({ error: upsertErr.message }, { status: 500 });
+    }
+
+    // Also save to pending_invites so they show up in the UI
+    await supabaseAdmin.from('pending_invites').upsert({
+      email:      normalizedEmail,
+      full_name:  full_name?.trim() || null,
+      role,
+      invited_by: user.id,
+    }, { onConflict: 'email' });
+
     return NextResponse.json({ success: true, existing_user: true });
   }
 

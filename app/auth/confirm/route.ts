@@ -15,8 +15,6 @@ export async function GET(request: NextRequest) {
   const next       = searchParams.get('next');
 
   const cookieStore = await cookies();
-
-  // Placeholder redirect — location header will be overwritten below
   const response = NextResponse.redirect(new URL('/', request.url));
 
   const supabase = createServerClient(
@@ -24,23 +22,19 @@ export async function GET(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
+        getAll() { return cookieStore.getAll(); },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
-            const cookieOptions = { ...options, path: '/' };
-            cookieStore.set(name, value, cookieOptions);
-            response.cookies.set(name, value, cookieOptions);
+            const o = { ...options, path: '/' };
+            cookieStore.set(name, value, o);
+            response.cookies.set(name, value, o);
           });
         },
       },
     }
   );
 
-  // ── Path A: token_hash present — we verify the OTP ourselves ──
-  // This is the standard magic-link flow where Supabase passes the
-  // token to us rather than verifying it on their server first.
+  // ── Path A: token_hash present — verify OTP ourselves ──────
   if (token_hash && type) {
     const { data: { user }, error } = await supabase.auth.verifyOtp({ type, token_hash });
 
@@ -53,8 +47,14 @@ export async function GET(request: NextRequest) {
 
     console.log(`[confirm] OTP verified (type=${type}), user=${user.id}`);
 
+    // For invite links: hydrate role from pending_invites
     if (type === 'invite' && user.email) {
-      await hydratRoleFromPendingInvite(user.id, user.email);
+      await hydrateRoleFromPendingInvite(user.id, user.email);
+    }
+
+    // For any login (magic link, invite): mark user as active
+    if (user.email) {
+      await activateUser(user.id, user.email);
     }
 
     const destination = next ?? await resolveRoleRedirect(user.id);
@@ -62,24 +62,23 @@ export async function GET(request: NextRequest) {
     return response;
   }
 
-  // ── Path B: no token_hash — Supabase already verified on their end ──
-  // The invite link format is:
-  //   supabase.co/auth/v1/verify?token=...&type=invite&redirect_to=.../auth/confirm
-  // Supabase verifies the token, sets the session cookie, then redirects here.
-  // By this point the user is already authenticated — just read the session.
+  // ── Path B: Supabase already verified — session in cookies ─
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
-    console.error('[confirm] Path B: no user found after Supabase redirect');
+    console.error('[confirm] Path B: no user found');
     return NextResponse.redirect(new URL('/login?error=no_session', request.url));
   }
 
-  console.log(`[confirm] Path B: session already set by Supabase, user=${user.id}`);
+  console.log(`[confirm] Path B: session set by Supabase, user=${user.id}`);
 
-  // Still need to hydrate role — type param is present in the redirect URL
-  // even in Path B, so we can detect invite links
   if (type === 'invite' && user.email) {
-    await hydratRoleFromPendingInvite(user.id, user.email);
+    await hydrateRoleFromPendingInvite(user.id, user.email);
+  }
+
+  // Mark active on every login
+  if (user.email) {
+    await activateUser(user.id, user.email);
   }
 
   const destination = next ?? await resolveRoleRedirect(user.id);
@@ -99,12 +98,16 @@ function adminClient() {
   );
 }
 
+/**
+ * Resolves where to send the user after login.
+ * Does NOT filter by is_active — that's the middleware's job.
+ * If no role found, returns '/' and middleware will handle the no_role case.
+ */
 async function resolveRoleRedirect(userId: string): Promise<string> {
   const { data } = await adminClient()
     .from('user_roles')
     .select('role')
     .eq('user_id', userId)
-    .eq('is_active', true)
     .single();
 
   if (data?.role === 'LP') return '/lp/dashboard';
@@ -112,7 +115,34 @@ async function resolveRoleRedirect(userId: string): Promise<string> {
   return '/';
 }
 
-async function hydratRoleFromPendingInvite(userId: string, email: string) {
+/**
+ * Sets is_active = true on the user_roles row when a user logs in.
+ * This is how Pending → Active transition happens.
+ */
+async function activateUser(userId: string, email: string) {
+  const admin = adminClient();
+  const normalizedEmail = email.trim().toLowerCase();
+
+  const { error } = await admin
+    .from('user_roles')
+    .update({ is_active: true })
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('[confirm] Failed to activate user:', error.message);
+  } else {
+    console.log(`[confirm] Activated user ${userId}`);
+  }
+
+  // Clean up any pending_invites row regardless of login type
+  await admin.from('pending_invites').delete().eq('email', normalizedEmail);
+}
+
+/**
+ * Copies pending_invites → user_roles on first invite login.
+ * Sets is_active: false — activateUser() handles flipping it to true.
+ */
+async function hydrateRoleFromPendingInvite(userId: string, email: string) {
   const admin = adminClient();
   const normalizedEmail = email.trim().toLowerCase();
 
@@ -123,7 +153,7 @@ async function hydratRoleFromPendingInvite(userId: string, email: string) {
     .single();
 
   if (fetchErr || !invite) {
-    console.warn(`[confirm] No pending invite found for ${normalizedEmail} — role may already be set`);
+    console.warn(`[confirm] No pending invite for ${normalizedEmail} — role may already be set`);
     return;
   }
 
@@ -133,7 +163,7 @@ async function hydratRoleFromPendingInvite(userId: string, email: string) {
       role:       invite.role,
       full_name:  invite.full_name ?? null,
       email:      normalizedEmail,
-      is_active:  true,
+      is_active:  false,          // activateUser() sets this to true right after
       invited_by: invite.invited_by ?? null,
     },
     { onConflict: 'user_id' }
@@ -145,5 +175,5 @@ async function hydratRoleFromPendingInvite(userId: string, email: string) {
   }
 
   await admin.from('pending_invites').delete().eq('email', normalizedEmail);
-  console.log(`[confirm] Role '${invite.role}' assigned to ${userId}`);
+  console.log(`[confirm] Role '${invite.role}' hydrated for ${userId}`);
 }

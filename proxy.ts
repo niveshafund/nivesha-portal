@@ -46,12 +46,12 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // Fetch role for this user
+  // Fetch role for this user — don't filter by is_active here,
+  // is_active is a display status only; routing is based on role alone.
   const { data: roleData } = await supabase
     .from('user_roles')
     .select('role')
     .eq('user_id', user.id)
-    .eq('is_active', true)
     .single();
 
   const role = roleData?.role ?? null;
