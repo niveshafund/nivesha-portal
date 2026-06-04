@@ -143,6 +143,8 @@ export default function UsersPage() {
   const [successMsg, setSuccessMsg]   = useState('');
   const [editingId, setEditingId]     = useState<string | null>(null);
   const [editRole, setEditRole]       = useState<AppRole>('Viewer');
+  const [editName, setEditName]       = useState('');
+  const [editEmail, setEditEmail]     = useState('');
   const [confirmDelete, setConfirmDelete] = useState<TeamMember | null>(null);
 
   useEffect(() => { loadData(); }, []);
@@ -206,7 +208,11 @@ export default function UsersPage() {
   }
 
   async function handleUpdateRole(memberId: string, newRole: AppRole) {
-    await supabase.from('user_roles').update({ role: newRole }).eq('id', memberId);
+    await supabase.from('user_roles').update({
+      role:      newRole,
+      full_name: editName.trim() || null,
+      email:     editEmail.trim().toLowerCase() || null,
+    }).eq('id', memberId);
     setEditingId(null);
     await loadData();
   }
@@ -369,26 +375,13 @@ export default function UsersPage() {
                   </div>
                 </td>
                 <td className="px-6 py-4">
-                  {editingId === m.id ? (
-                    <div className="flex items-center gap-2">
-                      <select value={editRole} onChange={e => setEditRole(e.target.value as AppRole)}
-                        className="px-2 py-1.5 rounded-[6px] border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3]">
-                        {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                      </select>
-                      <button onClick={() => handleUpdateRole(m.id, editRole)}
-                        className="text-[12px] text-[#2d5be3] font-medium hover:underline">Save</button>
-                      <button onClick={() => setEditingId(null)}
-                        className="text-[12px] text-[#9b9890] hover:underline">Cancel</button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                        className="w-3.5 h-3.5 text-amber-500">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                      </svg>
-                      <span className="text-[13.5px] text-[#1a1915]">{m.role}</span>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+                      className="w-3.5 h-3.5 text-amber-500">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                    <span className="text-[13.5px] text-[#1a1915]">{m.role}</span>
+                  </div>
                 </td>
                 <td className="px-6 py-4">
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium ${
@@ -414,7 +407,7 @@ export default function UsersPage() {
                     member={m}
                     isSelf={m.user_id === user?.id}
                     canManage={!!can.manageTeam(role)}
-                    onChangeRole={() => { setEditingId(m.id); setEditRole(m.role); }}
+                    onChangeRole={() => { setEditingId(m.id); setEditRole(m.role); setEditName(m.full_name ?? ''); setEditEmail(m.email ?? ''); }}
                     onDeactivate={() => handleDeactivate(m)}
                     onResend={() => handleResend(m.email ?? '', m.role)}
                     onDelete={() => setConfirmDelete(m)}
@@ -448,6 +441,55 @@ export default function UsersPage() {
           ))}
         </div>
       </div>
+
+      {/* Edit user modal */}
+      {editingId && (() => {
+        const m = members.find(x => x.id === editingId);
+        if (!m) return null;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/30" onClick={() => setEditingId(null)}/>
+            <div className="relative bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
+              <div className="text-[14px] font-semibold mb-4">Edit User</div>
+              <div className="space-y-3 mb-5">
+                <div>
+                  <label className="block text-[11.5px] font-medium mb-1">Full name</label>
+                  <input type="text" value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    placeholder="Jane Smith"
+                    className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-[11.5px] font-medium mb-1">Email address</label>
+                  <input type="email" value={editEmail}
+                    onChange={e => setEditEmail(e.target.value)}
+                    placeholder="jane@company.com"
+                    className={inputCls} />
+                  <p className="text-[11px] text-[#9b9890] mt-1">Updating email here only changes display — it does not change their Supabase auth email.</p>
+                </div>
+                <div>
+                  <label className="block text-[11.5px] font-medium mb-1">Role</label>
+                  <select value={editRole} onChange={e => setEditRole(e.target.value as AppRole)}
+                    className={inputCls}>
+                    {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <p className="text-[11px] text-[#9b9890] mt-1">{ROLE_META[editRole].description}</p>
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setEditingId(null)}
+                  className="px-4 py-2 rounded-[8px] text-[12.5px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                  Cancel
+                </button>
+                <button onClick={() => handleUpdateRole(editingId, editRole)}
+                  className="px-4 py-2 rounded-[8px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">
+                  Save changes
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Delete confirm modal */}
       {confirmDelete && (
