@@ -47,8 +47,9 @@ export async function GET(request: NextRequest) {
 
     console.log(`[confirm] OTP verified (type=${type}), user=${user.id}`);
 
-    // For invite links: hydrate role from pending_invites
-    if (type === 'invite' && user.email) {
+    // Always attempt to hydrate from pending_invites regardless of type —
+    // covers both invite links and magic link logins for invited users.
+    if (user.email) {
       await hydrateRoleFromPendingInvite(user.id, user.email);
     }
 
