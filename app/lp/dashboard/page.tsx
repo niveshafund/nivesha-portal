@@ -469,7 +469,7 @@ export default function LPDashboardPage() {
         <div className="mb-5">
           <h1 className="text-[24px] font-bold text-[#1a1915]">{view === 'my-share' ? lp.name : fund.name}</h1>
           <p className="text-[13px] text-[#9b9890]">
-            {fund.name} · as at {today}
+            {view === 'my-share' ? `${fund.name} · as at ${today}` : `Fund Total · as at ${today}`}
             {view === 'my-share' && <span className="ml-2 px-2 py-0.5 bg-[#eef2fd] text-[#2d5be3] rounded-full text-[11px] font-medium">{pct(share)} ownership</span>}
           </p>
         </div>
@@ -488,7 +488,7 @@ export default function LPDashboardPage() {
             <div className="flex justify-between items-center">
               <div>
                 <div className="text-[15px] font-bold">Net Gain to {view === 'my-share' ? 'LP' : 'Fund'}</div>
-                <div className="text-[12px] text-[#9b9890]">On {fmt(commitment)} Commitment</div>
+                <div className="text-[12px] text-[#9b9890]">On {fmt(view === 'my-share' ? commitment : fundTotalCalled)} {view === 'my-share' ? 'Commitment' : 'Called Capital'}</div>
               </div>
               <div className="text-right">
                 <div className={`text-[18px] font-bold ${netGain >= 0 ? 'text-green-600' : 'text-red-500'}`}>{netGain >= 0 ? '' : '-'}{fmt(Math.abs(netGain))}</div>
@@ -500,20 +500,19 @@ export default function LPDashboardPage() {
 
         {/* ── Metrics Cards ── */}
         <div className="grid grid-cols-4 gap-3 mb-5">
-          <StatCard label="Capital Called" value={fmt(view === 'my-share' ? capitalCalled : capitalCalled / share)} sub="Σ capital calls" />
+          <StatCard label="Capital Called" value={fmt(totalIn)} sub="Σ capital calls" />
           <StatCard label="Admin Fee" value={fmt(managementFees)} sub="Σ fees & expenses" />
           <StatCard label="Net Invested Capital" value={fmt(netInvested)} sub="Called – Fees" />
-          <StatCard label="Portfolio Value" value={fmt(portfolioValue)} sub="Current NAV" color="text-[#2d5be3]" />
+          <StatCard label="Capital Deployed" value={fmt(deployed)} sub="Net Invested – Cash" />
         </div>
         <div className="grid grid-cols-3 gap-3 mb-5">
           <StatCard label="Unrealised Gain / Loss" value={fmt(unrealisedGL)} sub="Fair value – cost" color={unrealisedGL >= 0 ? 'text-green-600' : 'text-red-500'} />
-          <StatCard label="Distributions" value={fmt(distributions)} sub="Cash received" />
-          <StatCard label="Total Value" value={fmt(portfolioValue + distributions)} sub="NAV + Distributions" />
+          <StatCard label="Distributions" value={fmt(view === 'my-share' ? distributions : distributions / (share || 1))} sub="Cash received" />
+          <StatCard label="Portfolio Value" value={fmt(portfolioValue)} sub="NAV · invested at cost if no valuation" color="text-[#2d5be3]" />
         </div>
 
         {/* ── Returns ── */}
         <div className="grid grid-cols-2 gap-4 mb-5">
-          {/* Net Returns */}
           <div className="bg-white rounded-xl border border-[#eaeaea] p-5">
             <div className="flex items-center gap-2 mb-4">
               <span className="text-[14px] font-semibold">Net Returns</span>
@@ -521,7 +520,7 @@ export default function LPDashboardPage() {
             </div>
             <div className="space-y-2 mb-4 pb-4 border-b border-[#f0efe9]">
               <div className="flex justify-between text-[13px]"><span className="text-[#6b6860]">Portfolio Value</span><span className="font-mono">{fmt(portfolioValue)}</span></div>
-              <div className="flex justify-between text-[13px]"><span className="text-[#6b6860]">+ Distributions</span><span className="font-mono">{fmt(distributions)}</span></div>
+              <div className="flex justify-between text-[13px]"><span className="text-[#6b6860]">+ Distributions</span><span className="font-mono">{fmt(view === 'my-share' ? distributions : distributions / (share || 1))}</span></div>
               <div className="flex justify-between text-[13px]"><span className="text-[#6b6860]">÷ Total Paid In</span><span className="font-mono">{fmt(totalIn)}</span></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -531,12 +530,10 @@ export default function LPDashboardPage() {
               </div>
               <div className="bg-[#f9f8f5] rounded-lg p-3">
                 <div className="text-[10.5px] text-[#9b9890] uppercase tracking-wide mb-1">NET IRR</div>
-                <div className="text-[22px] font-bold">{lp.ownership_pct > 0 ? (lp.distributions > 0 ? '~' : '') + (netMOIC > 1 ? ((netMOIC - 1) * 25).toFixed(1) : '0.0') + '%' : '—'}</div>
+                <div className="text-[22px] font-bold">{netMOIC > 1 ? ((netMOIC - 1) * 25).toFixed(1) + '%' : '—'}</div>
               </div>
             </div>
           </div>
-
-          {/* Gross Returns */}
           <div className="bg-white rounded-xl border border-[#eaeaea] p-5">
             <div className="flex items-center gap-2 mb-4">
               <span className="text-[14px] font-semibold">Gross Returns</span>
@@ -544,7 +541,7 @@ export default function LPDashboardPage() {
             </div>
             <div className="space-y-2 mb-4 pb-4 border-b border-[#f0efe9]">
               <div className="flex justify-between text-[13px]"><span className="text-[#6b6860]">Portfolio Value</span><span className="font-mono">{fmt(portfolioValue)}</span></div>
-              <div className="flex justify-between text-[13px]"><span className="text-[#6b6860]">+ Distributions</span><span className="font-mono">{fmt(distributions)}</span></div>
+              <div className="flex justify-between text-[13px]"><span className="text-[#6b6860]">+ Distributions</span><span className="font-mono">{fmt(view === 'my-share' ? distributions : distributions / (share || 1))}</span></div>
               <div className="flex justify-between text-[13px]"><span className="text-[#6b6860]">÷ Invested Capital</span><span className="font-mono">{fmt(netInvested)}</span></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -585,9 +582,7 @@ export default function LPDashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0efe9" vertical={false}/>
                 <XAxis dataKey="quarter" tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false}/>
                 <YAxis tickFormatter={v => fmt(v, true)} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={60}/>
-                <Tooltip
-                  formatter={(v: any) => [fmt(Number(v)), 'Portfolio Value']}
-                  contentStyle={{ fontSize: 12, border: '1px solid #e8e6df', borderRadius: 8 }}/>
+                <Tooltip formatter={(v: any) => [fmt(Number(v)), 'Portfolio Value']} contentStyle={{ fontSize: 12, border: '1px solid #e8e6df', borderRadius: 8 }}/>
                 <Area type="monotone" dataKey="value" stroke="#2d5be3" strokeWidth={2} fill="url(#navGrad)" dot={{ fill: '#2d5be3', r: 3 }}/>
               </AreaChart>
             </ResponsiveContainer>
@@ -605,12 +600,11 @@ export default function LPDashboardPage() {
               <span className="text-[14px] font-semibold">Capital Flow</span>
             </div>
             <p className="text-[11.5px] text-[#9b9890] mb-4">From commitment to deployment</p>
-
             {[
-              { n: '1', label: 'COMMITMENT', title: 'Committed Capital', value: fmt(commitment), sub: 'Total commitment to fund' },
-              { n: '2', label: 'CAPITAL CALLED', title: 'Called Capital', value: fmt(capitalCalled), sub: 'Total capital called from LP' },
-              { n: '3', label: 'FEES & EXPENSES', title: 'Admin Fee', value: fmt(managementFees), sub: 'Management fees' },
-              { n: '4', label: 'DEPLOYED', title: 'Invested in Companies', value: fmt(deployed), sub: 'Net Invested – Cash' },
+              { n: '1', label: 'COMMITMENT',     title: view === 'my-share' ? 'Committed Capital' : 'Total Fund Target',   value: fmt(view === 'my-share' ? commitment : fundTotalCalled), sub: view === 'my-share' ? 'Total commitment to fund' : 'Total capital called across all LPs' },
+              { n: '2', label: 'CAPITAL CALLED', title: 'Called Capital',      value: fmt(totalIn),          sub: view === 'my-share' ? 'Total capital called from LP' : 'Total capital called from investors' },
+              { n: '3', label: 'FEES & EXPENSES',title: 'Admin Fee',           value: fmt(managementFees),   sub: 'Management fees' },
+              { n: '4', label: 'DEPLOYED',       title: 'Invested in Companies',value: fmt(deployed),        sub: 'Net Invested – Cash' },
             ].map(row => (
               <div key={row.n} className="bg-[#f9f8f5] rounded-lg p-3 mb-2">
                 <div className="flex items-center gap-2 mb-1">
@@ -633,23 +627,23 @@ export default function LPDashboardPage() {
               <span className="text-[14px] font-semibold">Returns & Value</span>
             </div>
             <p className="text-[11.5px] text-[#9b9890] mb-4">Current value and returns</p>
-
             {[
-              { label: 'PORTFOLIO VALUE', title: 'Current NAV', value: fmt(portfolioValue), sub: 'Current valuation of holdings', color: 'text-[#2d5be3]' },
-              { label: 'DISTRIBUTIONS', title: 'Cash Received', value: fmt(distributions), sub: 'From portfolio exits' },
-              { label: 'TOTAL VALUE', title: 'NAV + Distributions', value: fmt(portfolioValue + distributions), sub: 'Combined value' },
+              { label: 'PORTFOLIO VALUE', title: 'Current NAV',         value: fmt(portfolioValue),                                              sub: 'Current valuation of holdings',  color: 'text-[#2d5be3]' },
+              { label: 'DISTRIBUTIONS',  title: 'Cash Received',        value: fmt(view === 'my-share' ? distributions : distributions / (share || 1)), sub: 'From portfolio exits' },
+              { label: 'TOTAL VALUE',    title: 'NAV + Distributions',  value: fmt(portfolioValue + (view === 'my-share' ? distributions : distributions / (share || 1))), sub: 'Combined value' },
             ].map(row => (
               <div key={row.label} className="bg-[#f9f8f5] rounded-lg p-3 mb-2">
                 <div className="text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1">{row.label}</div>
                 <div className="text-[13px] text-[#6b6860] mb-0.5">{row.title}</div>
-                <div className={`text-[20px] font-bold ${row.color ?? ''}`}>{row.value}</div>
+                <div className={`text-[20px] font-bold ${(row as any).color ?? ''}`}>{row.value}</div>
                 <div className="text-[11px] text-[#9b9890]">{row.sub}</div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* ── Capital Calls History ── */}
+        {/* ── Capital Calls History — My Share only ── */}
+        {view === 'my-share' && (
         <div className="bg-white rounded-xl border border-[#eaeaea] p-6 mb-8">
           <div className="flex items-center gap-2 mb-1">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-[#6b6860]">
@@ -695,6 +689,7 @@ export default function LPDashboardPage() {
             </table>
           )}
         </div>
+        )} {/* end view === my-share for Capital Calls */}
         </>) /* end performance tab */}
       </main>
     </div>
