@@ -15,6 +15,7 @@ type LP = {
 type Fund = { id: string; name: string; vintage: number; nav: number; management_fee: number };
 type LPTxn = { id: string; date: string; amount: number; type: string; notes?: string };
 type Company = { id: string; name: string; sector?: string; stage?: string; invested: number; unrealised: number };
+type LPDoc = { id: string; name: string; file_path: string; file_size?: number; file_type?: string; doc_type?: string; created_at: string };
 type Valuation = { company_id: string; quarter: string; quarter_end: string; value: number };
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -145,6 +146,8 @@ export default function LPDashboardPage() {
   const [valuations, setValuations] = useState<Valuation[]>([]);
   const [loading, setLoading]   = useState(true);
   const [view, setView]         = useState<'my-share' | 'fund-total'>('my-share');
+  const [tab, setTab]           = useState<'performance' | 'documents'>('performance');
+  const [documents, setDocuments] = useState<LPDoc[]>([]);
   const [user, setUser]         = useState<any>(null);
   // null = still loading, true = no LP record linked yet
   const [pendingSetup, setPendingSetup] = useState(false);
@@ -176,17 +179,20 @@ export default function LPDashboardPage() {
         { data: txnData },
         { data: compData },
         { data: valData },
+        { data: docData },
       ] = await Promise.all([
         supabase.from('funds').select('id,name,vintage,nav,management_fee').eq('id', lpData.fund_id).single(),
         supabase.from('lp_transactions').select('*').eq('lp_id', lpData.id).order('date'),
         supabase.from('companies').select('id,name,sector,stage,invested,unrealised').eq('fund_id', lpData.fund_id).eq('status', 'Active'),
         supabase.from('valuations').select('company_id,quarter,quarter_end,value').eq('fund_id', lpData.fund_id).order('quarter_end'),
+        supabase.from('lp_documents').select('*').eq('lp_id', lpData.id).order('created_at', { ascending: false }),
       ]);
 
       setFund(fundData as Fund);
       setTxns((txnData ?? []) as LPTxn[]);
       setCompanies((compData ?? []) as Company[]);
       setValuations((valData ?? []) as Valuation[]);
+      setDocuments((docData ?? []) as LPDoc[]);
     } finally {
       setLoading(false);
     }
@@ -340,6 +346,21 @@ export default function LPDashboardPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-8">
+        {/* ── Tab nav ── */}
+        <div className="flex gap-1 mb-6 border-b border-[#eaeaea]">
+          {[
+            { key: 'performance', label: 'Fund Performance', icon: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/> },
+            { key: 'documents',   label: `Documents${documents.length > 0 ? ` (${documents.length})` : ''}`, icon: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></> },
+          ].map(t => (
+            <button key={t.key} onClick={() => setTab(t.key as any)}
+              className={`flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${tab === t.key ? 'border-[#2d5be3] text-[#2d5be3]' : 'border-transparent text-[#6b6860] hover:text-[#1a1915]'}`}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">{t.icon}</svg>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'performance' && (<>
         {/* ── View toggle ── */}
         <div className="bg-white rounded-xl border border-[#eaeaea] px-5 py-3 mb-6 flex items-center gap-4">
           <span className="text-[13px] text-[#6b6860]">View:</span>
@@ -639,6 +660,77 @@ export default function LPDashboardPage() {
             </table>
           )}
         </div>
+        </>) /* end tab === performance */}
+
+        {tab === 'documents' && (
+          <div>
+            <div className="mb-5">
+              <h1 className="text-[22px] font-bold text-[#1a1915]">Documents</h1>
+              <p className="text-[13px] text-[#9b9890] mt-1">Your fund documents — LPA, K-1s, capital call notices, and quarterly reports.</p>
+            </div>
+
+            {documents.length === 0 ? (
+              <div className="bg-white rounded-xl border border-[#eaeaea] p-12 text-center">
+                <div className="w-12 h-12 rounded-full bg-[#f0efe9] flex items-center justify-center mx-auto mb-4">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#9b9890" strokeWidth={1.5} className="w-6 h-6">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                  </svg>
+                </div>
+                <div className="text-[14px] font-medium text-[#1a1915] mb-1">No documents yet</div>
+                <p className="text-[12.5px] text-[#9b9890]">Your fund manager will upload documents here as they become available.</p>
+              </div>
+            ) : (
+              <>
+                {Object.entries(
+                  documents.reduce<Record<string, LPDoc[]>>((acc, doc) => {
+                    const group = doc.doc_type ?? 'Other';
+                    if (!acc[group]) acc[group] = [];
+                    acc[group].push(doc);
+                    return acc;
+                  }, {})
+                ).map(([group, docs]) => (
+                  <div key={group} className="bg-white rounded-xl border border-[#eaeaea] mb-4 overflow-hidden">
+                    <div className="px-5 py-3 border-b border-[#eaeaea] bg-[#fafaf8]">
+                      <span className="text-[12px] font-semibold text-[#6b6860] uppercase tracking-wide">{group}</span>
+                      <span className="ml-2 text-[11.5px] text-[#9b9890]">{docs.length} file{docs.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div className="divide-y divide-[#f0efe9]">
+                      {docs.map(doc => (
+                        <div key={doc.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-[#fafaf8] transition-colors">
+                          <div className="w-9 h-9 rounded-lg bg-[#eef2fd] flex items-center justify-center flex-shrink-0">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="#2d5be3" strokeWidth={2} className="w-5 h-5">
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                              <polyline points="14 2 14 8 20 8"/>
+                            </svg>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[13.5px] font-medium text-[#1a1915] truncate">{doc.name}</div>
+                            <div className="text-[11.5px] text-[#9b9890] mt-0.5">
+                              {doc.file_type?.replace('application/','').toUpperCase()}
+                              {doc.file_size ? ` · ${(doc.file_size / 1024).toFixed(0)} KB` : ''}
+                              {' · '}
+                              {new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </div>
+                          </div>
+                          <a href={doc.file_path} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] border border-[#e8e6df] text-[12px] font-medium text-[#2d5be3] hover:bg-[#eef2fd] transition-colors flex-shrink-0">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                              <polyline points="7 10 12 15 17 10"/>
+                              <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            Download
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );
