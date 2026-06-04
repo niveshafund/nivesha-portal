@@ -100,9 +100,15 @@ export default function DashboardPage() {
       if (vDate > exDate) acc[v.company_id] = v;
       return acc;
     }, {});
+    // For KPI portfolioValue: use latest valuation if available, else cost (invested amount)
+    const investedByCompany = txns.filter(t => t.type === 'Investment').reduce<Record<string, number>>((acc, t) => {
+      if (!t.company_id) return acc;
+      acc[t.company_id] = (acc[t.company_id] ?? 0) + t.amount;
+      return acc;
+    }, {});
     const portfolioValue = companies.reduce((s, co) => {
       const latest = latestByCompany[co.id];
-      return s + (latest ? latest.value : co.unrealised || 0);
+      return s + (latest ? latest.value : (investedByCompany[co.id] ?? 0));
     }, 0);
 
     const totalValue = portfolioValue + distributions;
