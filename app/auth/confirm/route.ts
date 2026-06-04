@@ -72,7 +72,10 @@ export async function GET(request: NextRequest) {
 
   console.log(`[confirm] Path B: session set by Supabase, user=${user.id}`);
 
-  if (type === 'invite' && user.email) {
+  // Always attempt to hydrate from pending_invites — Supabase's redirect_to
+  // doesn't preserve the type param, so we can't rely on type === 'invite'.
+  // hydrateRoleFromPendingInvite is a no-op if no pending invite exists.
+  if (user.email) {
     await hydrateRoleFromPendingInvite(user.id, user.email);
   }
 
