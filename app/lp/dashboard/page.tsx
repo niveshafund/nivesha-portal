@@ -145,8 +145,8 @@ export default function LPDashboardPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [valuations, setValuations] = useState<Valuation[]>([]);
   const [loading, setLoading]   = useState(true);
-  const [view, setView]         = useState<'my-share' | 'fund-total'>('my-share');
-  const [tab, setTab]           = useState<'performance' | 'documents'>('performance');
+  const [view, setView]           = useState<'my-share' | 'fund-total'>('my-share');
+  const [tab, setTab]             = useState<'performance' | 'documents'>('performance');
   const [documents, setDocuments] = useState<LPDoc[]>([]);
   const [user, setUser]         = useState<any>(null);
   // null = still loading, true = no LP record linked yet
@@ -239,51 +239,68 @@ export default function LPDashboardPage() {
   // ── Calculations ────────────────────────────────────────────
   const share = lp.ownership_pct / 100;
 
-  // LP-level
-  const capitalCalled   = lp.called;
-  const distributions   = lp.distributions;
-  const commitment      = lp.commitment;
+  // LP-level direct fields
+  const capitalCalled  = lp.called;
+  const distributions  = lp.distributions;
+  const commitment     = lp.commitment;
 
-  // Fund-level totals (for My Share: multiply by share)
-  const fundNAV         = fund.nav;
-  const myNAV           = fundNAV * share;
-  const portfolioValue  = view === 'my-share' ? myNAV : fundNAV;
+  // ── Unrealised gain — use valuations table, NOT c.unrealised ──
+  // Latest valuation per company
+  const latestValByCompany: Record<string, number> = {};
+  valuations.forEach(v => {
+    if (!latestValByCompany[v.company_id] ||
+        v.quarter_end > (valuations.find(x => x.company_id === v.company_id && latestValByCompany[v.company_id] === x.value)?.quarter_end ?? '')) {
+      latestValByCompany[v.company_id] = v.value;
+    }
+  });
+  // Fund-level portfolio value from valuations; fallback to invested at cost
+  const fundPortfolioValue = companies.reduce((s, c) => {
+    const latestVal = latestValByCompany[c.id];
+    return s + (latestVal ?? c.invested ?? 0);
+  }, 0);
+  const fundInvested    = companies.reduce((s, c) => s + (c.invested ?? 0), 0);
+  const fundUnrealised  = fundPortfolioValue - fundInvested;
 
-  // Expenses (management fee applied to LP's called capital)
-  const managementFees  = view === 'my-share'
+  // My share values
+  const myPortfolioValue = fundPortfolioValue * share;
+  const myUnrealised     = fundUnrealised * share;
+
+  // View-aware values
+  const portfolioValue  = view === 'my-share' ? myPortfolioValue : fundPortfolioValue;
+  const unrealisedGL    = view === 'my-share' ? myUnrealised     : fundUnrealised;
+
+  // Management fees
+  const fundTotalCalled  = share > 0 ? capitalCalled / share : 0;
+  const managementFees   = view === 'my-share'
     ? (fund.management_fee / 100) * capitalCalled
-    : (fund.management_fee / 100) * txns.reduce((s, t) => t.type === 'Capital Call' ? s + t.amount : s, 0) / share;
+    : (fund.management_fee / 100) * fundTotalCalled;
 
-  // Net invested
-  const netInvested     = view === 'my-share'
+  // Net invested (called minus fees)
+  const netInvested      = view === 'my-share'
     ? capitalCalled - managementFees
-    : capitalCalled / share - managementFees;
+    : fundTotalCalled - managementFees;
 
-  // Unrealised gain/loss (LP's share of fund unrealised)
-  const fundUnrealised  = companies.reduce((s, c) => s + c.unrealised, 0);
-  const myUnrealised    = fundUnrealised * share;
-  const unrealisedGL    = view === 'my-share' ? myUnrealised : fundUnrealised;
-
-  // Realised (exits/distributions from transactions)
-  const realisedGL      = 0; // simplified — would need exit transactions
+  // Deployed capital
+  const deployed         = view === 'my-share'
+    ? fundInvested * share
+    : fundInvested;
 
   // Undeployed cash
-  const deployed        = view === 'my-share'
-    ? companies.reduce((s, c) => s + c.invested * share, 0)
-    : companies.reduce((s, c) => s + c.invested, 0);
-  const undeployedCash  = (view === 'my-share' ? capitalCalled : capitalCalled / share) - deployed - managementFees;
+  const totalCalled      = view === 'my-share' ? capitalCalled : fundTotalCalled;
+  const undeployedCash   = Math.max(0, totalCalled - deployed - managementFees);
 
   // Net gain
-  const netGain         = unrealisedGL + realisedGL - managementFees - Math.max(0, undeployedCash);
-  const netGainPct      = commitment > 0 ? (netGain / commitment * 100).toFixed(1) : '0.0';
+  const realisedGL       = 0;
+  const netGain          = unrealisedGL + realisedGL - managementFees - undeployedCash;
+  const netGainPct       = commitment > 0 ? (netGain / commitment * 100).toFixed(1) : '0.0';
 
-  // MOIC
-  const totalValue      = portfolioValue + distributions;
-  const totalIn         = view === 'my-share' ? capitalCalled : capitalCalled / share;
-  const netMOIC         = totalIn > 0 ? totalValue / totalIn : 0;
-  const grossMOIC       = (totalIn - managementFees) > 0 ? totalValue / (totalIn - managementFees) : 0;
+  // MOIC & IRR
+  const totalValue       = portfolioValue + (view === 'my-share' ? distributions : distributions / (share || 1));
+  const totalIn          = view === 'my-share' ? capitalCalled : fundTotalCalled;
+  const netMOIC          = totalIn > 0 ? totalValue / totalIn : 0;
+  const grossMOIC        = netInvested > 0 ? totalValue / netInvested : 0;
 
-  // Portfolio value over time (from valuations)
+  // Chart data from valuations
   const latestByCompanyByQuarter: Record<string, Record<string, number>> = {};
   valuations.forEach(v => {
     if (!latestByCompanyByQuarter[v.quarter]) latestByCompanyByQuarter[v.quarter] = {};
@@ -295,9 +312,6 @@ export default function LPDashboardPage() {
       quarter,
       value: Object.values(vals).reduce((s, v) => s + v, 0) * (view === 'my-share' ? share : 1),
     }));
-
-  // Capital calls history
-  const capitalCalls = txns.filter(t => t.type === 'Capital Call').sort((a, b) => b.date.localeCompare(a.date));
 
   const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
@@ -346,19 +360,85 @@ export default function LPDashboardPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-8">
+
         {/* ── Tab nav ── */}
         <div className="flex gap-1 mb-6 border-b border-[#eaeaea]">
           {[
-            { key: 'performance', label: 'Fund Performance', icon: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/> },
-            { key: 'documents',   label: `Documents${documents.length > 0 ? ` (${documents.length})` : ''}`, icon: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></> },
+            { key: 'performance', label: 'Fund Performance' },
+            { key: 'documents',   label: `Documents${documents.length > 0 ? ` (${documents.length})` : ''}` },
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key as any)}
-              className={`flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${tab === t.key ? 'border-[#2d5be3] text-[#2d5be3]' : 'border-transparent text-[#6b6860] hover:text-[#1a1915]'}`}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">{t.icon}</svg>
+              className={`px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${tab === t.key ? 'border-[#2d5be3] text-[#2d5be3]' : 'border-transparent text-[#6b6860] hover:text-[#1a1915]'}`}>
               {t.label}
             </button>
           ))}
         </div>
+
+        {tab === 'documents' && (
+          <div>
+            <div className="mb-5">
+              <h1 className="text-[22px] font-bold text-[#1a1915]">Documents</h1>
+              <p className="text-[13px] text-[#9b9890] mt-1">Your fund documents — LPA, K-1s, capital call notices, and quarterly reports.</p>
+            </div>
+            {documents.length === 0 ? (
+              <div className="bg-white rounded-xl border border-[#eaeaea] p-12 text-center">
+                <div className="w-12 h-12 rounded-full bg-[#f0efe9] flex items-center justify-center mx-auto mb-4">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#9b9890" strokeWidth={1.5} className="w-6 h-6">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                  </svg>
+                </div>
+                <div className="text-[14px] font-medium text-[#1a1915] mb-1">No documents yet</div>
+                <p className="text-[12.5px] text-[#9b9890]">Your fund manager will upload documents here as they become available.</p>
+              </div>
+            ) : (
+              Object.entries(
+                documents.reduce<Record<string, LPDoc[]>>((acc, doc) => {
+                  const group = doc.doc_type ?? 'Other';
+                  if (!acc[group]) acc[group] = [];
+                  acc[group].push(doc);
+                  return acc;
+                }, {})
+              ).map(([group, docs]) => (
+                <div key={group} className="bg-white rounded-xl border border-[#eaeaea] mb-4 overflow-hidden">
+                  <div className="px-5 py-3 border-b border-[#eaeaea] bg-[#fafaf8]">
+                    <span className="text-[12px] font-semibold text-[#6b6860] uppercase tracking-wide">{group}</span>
+                    <span className="ml-2 text-[11.5px] text-[#9b9890]">{docs.length} file{docs.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="divide-y divide-[#f0efe9]">
+                    {docs.map(doc => (
+                      <div key={doc.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-[#fafaf8] transition-colors">
+                        <div className="w-9 h-9 rounded-lg bg-[#eef2fd] flex items-center justify-center flex-shrink-0">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="#2d5be3" strokeWidth={2} className="w-5 h-5">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                          </svg>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13.5px] font-medium text-[#1a1915] truncate">{doc.name}</div>
+                          <div className="text-[11.5px] text-[#9b9890] mt-0.5">
+                            {doc.file_type?.replace('application/','').toUpperCase()}
+                            {doc.file_size ? ` · ${(doc.file_size / 1024).toFixed(0)} KB` : ''}
+                            {' · '}{new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </div>
+                        </div>
+                        <a href={doc.file_path} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] border border-[#e8e6df] text-[12px] font-medium text-[#2d5be3] hover:bg-[#eef2fd] transition-colors flex-shrink-0">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                          </svg>
+                          Download
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
         {tab === 'performance' && (<>
         {/* ── View toggle ── */}
@@ -569,51 +649,6 @@ export default function LPDashboardPage() {
           </div>
         </div>
 
-        {/* ── Portfolio Companies ── */}
-        <div className="bg-white rounded-xl border border-[#eaeaea] p-6 mb-5">
-          <div className="flex items-center gap-2 mb-1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-[#6b6860]">
-              <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-            </svg>
-            <span className="text-[15px] font-semibold">Portfolio Companies</span>
-          </div>
-          <p className="text-[12px] text-[#9b9890] mb-5">
-            Active companies in {fund.name}
-            {view === 'my-share' && <span className="ml-1">· Your share is {pct(share)}</span>}
-          </p>
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-[#f0efe9]">
-                {['Company', 'Sector', 'Stage', 'Current Value', 'Gain / Loss'].map(h => (
-                  <th key={h} className={`text-[11px] font-semibold text-[#9b9890] tracking-wide pb-2 ${h === 'Current Value' || h === 'Gain / Loss' ? 'text-right' : 'text-left'}`}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#f9f8f5]">
-              {companies.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-[13px] text-[#9b9890]">No portfolio companies yet</td>
-                </tr>
-              ) : companies.map(c => {
-                const myInvested = c.invested * (view === 'my-share' ? share : 1);
-                const myFV = (c.invested + c.unrealised) * (view === 'my-share' ? share : 1);
-                const gl = myFV - myInvested;
-                return (
-                  <tr key={c.id} className="hover:bg-[#fafaf8] transition-colors">
-                    <td className="py-3 text-[13px] font-medium">{c.name}</td>
-                    <td className="py-3 text-[12.5px] text-[#6b6860]">{c.sector ?? '—'}</td>
-                    <td className="py-3 text-[12.5px] text-[#6b6860]">{c.stage ?? '—'}</td>
-                    <td className="py-3 text-[13px] font-mono text-right">{fmt(myFV)}</td>
-                    <td className={`py-3 text-[13px] font-mono text-right ${gl >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                      {gl >= 0 ? '+' : ''}{fmt(gl)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
         {/* ── Capital Calls History ── */}
         <div className="bg-white rounded-xl border border-[#eaeaea] p-6 mb-8">
           <div className="flex items-center gap-2 mb-1">
@@ -660,77 +695,7 @@ export default function LPDashboardPage() {
             </table>
           )}
         </div>
-        </>) /* end tab === performance */}
-
-        {tab === 'documents' && (
-          <div>
-            <div className="mb-5">
-              <h1 className="text-[22px] font-bold text-[#1a1915]">Documents</h1>
-              <p className="text-[13px] text-[#9b9890] mt-1">Your fund documents — LPA, K-1s, capital call notices, and quarterly reports.</p>
-            </div>
-
-            {documents.length === 0 ? (
-              <div className="bg-white rounded-xl border border-[#eaeaea] p-12 text-center">
-                <div className="w-12 h-12 rounded-full bg-[#f0efe9] flex items-center justify-center mx-auto mb-4">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="#9b9890" strokeWidth={1.5} className="w-6 h-6">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                    <polyline points="14 2 14 8 20 8"/>
-                  </svg>
-                </div>
-                <div className="text-[14px] font-medium text-[#1a1915] mb-1">No documents yet</div>
-                <p className="text-[12.5px] text-[#9b9890]">Your fund manager will upload documents here as they become available.</p>
-              </div>
-            ) : (
-              <>
-                {Object.entries(
-                  documents.reduce<Record<string, LPDoc[]>>((acc, doc) => {
-                    const group = doc.doc_type ?? 'Other';
-                    if (!acc[group]) acc[group] = [];
-                    acc[group].push(doc);
-                    return acc;
-                  }, {})
-                ).map(([group, docs]) => (
-                  <div key={group} className="bg-white rounded-xl border border-[#eaeaea] mb-4 overflow-hidden">
-                    <div className="px-5 py-3 border-b border-[#eaeaea] bg-[#fafaf8]">
-                      <span className="text-[12px] font-semibold text-[#6b6860] uppercase tracking-wide">{group}</span>
-                      <span className="ml-2 text-[11.5px] text-[#9b9890]">{docs.length} file{docs.length !== 1 ? 's' : ''}</span>
-                    </div>
-                    <div className="divide-y divide-[#f0efe9]">
-                      {docs.map(doc => (
-                        <div key={doc.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-[#fafaf8] transition-colors">
-                          <div className="w-9 h-9 rounded-lg bg-[#eef2fd] flex items-center justify-center flex-shrink-0">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="#2d5be3" strokeWidth={2} className="w-5 h-5">
-                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                              <polyline points="14 2 14 8 20 8"/>
-                            </svg>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-[13.5px] font-medium text-[#1a1915] truncate">{doc.name}</div>
-                            <div className="text-[11.5px] text-[#9b9890] mt-0.5">
-                              {doc.file_type?.replace('application/','').toUpperCase()}
-                              {doc.file_size ? ` · ${(doc.file_size / 1024).toFixed(0)} KB` : ''}
-                              {' · '}
-                              {new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                            </div>
-                          </div>
-                          <a href={doc.file_path} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] border border-[#e8e6df] text-[12px] font-medium text-[#2d5be3] hover:bg-[#eef2fd] transition-colors flex-shrink-0">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
-                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                              <polyline points="7 10 12 15 17 10"/>
-                              <line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                            Download
-                          </a>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        )}
+        </>) /* end performance tab */}
       </main>
     </div>
   );
