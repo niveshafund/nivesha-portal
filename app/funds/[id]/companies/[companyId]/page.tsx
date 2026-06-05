@@ -159,14 +159,24 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
           invested:       co.invested        ? String(co.invested) : '',
           valuation:      co.valuation       ? String(co.valuation) : '',
           valuationType:  co.valuation_type  ?? 'Post-money',
-          discount:       co.discount_pct    ? String(co.discount_pct) : '',
-          valuationCap:   co.valuation_cap   ? String(co.valuation_cap) : '',
+          discount:       '',
+          valuationCap:   '',
         });
       }
 
       setTxns(t);
       setVals(v);
       setUpdates(u);
+
+      // Pull discount/cap from first investment transaction after txns are available
+      const firstInvTxn = t.find((x: any) => x.type === 'Investment');
+      if (firstInvTxn) {
+        setForm(f => ({
+          ...f,
+          discount:     firstInvTxn.discount_pct  ? String(firstInvTxn.discount_pct)  : '',
+          valuationCap: firstInvTxn.valuation_cap ? String(firstInvTxn.valuation_cap) : '',
+        }));
+      }
     } finally {
       setLoading(false);
     }
