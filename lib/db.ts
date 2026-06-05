@@ -85,9 +85,9 @@ export type DbCompany = {
   valuation?: number;
   valuation_type?: string;
   investment_date?: string;
-  headline?: string;
-  about?: string;
-  notes?: string;   
+  headline?: string | null;
+  about?: string | null;
+  notes?: string | null;
   invested: number;
   unrealised: number;
   distributions: number;

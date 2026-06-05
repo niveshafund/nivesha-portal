@@ -223,10 +223,12 @@ type GroupedTxnProps = {
   txns: any[];
   fundId: string;
   onExport: () => void;
+  search: string;
+  onSearchChange: (v: string) => void;
 };
 
-function InvestedCapitalGrouped({ txns, fundId, onExport }: GroupedTxnProps) {
-  const groups = React.useMemo(() => {
+function InvestedCapitalGrouped({ txns, fundId, onExport, search, onSearchChange }: GroupedTxnProps) {
+  const allGroups = React.useMemo(() => {
     const map = new Map<string, { company_name: string; company_id: string | null; txns: any[] }>();
     txns.forEach(t => {
       const key = t.company_name;
@@ -239,6 +241,10 @@ function InvestedCapitalGrouped({ txns, fundId, onExport }: GroupedTxnProps) {
       return bDate.localeCompare(aDate);
     });
   }, [txns]);
+
+  const groups = search
+    ? allGroups.filter(g => g.company_name.toLowerCase().includes(search.toLowerCase()))
+    : allGroups;
 
   const totalInvested = txns.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
   const totalDistrib  = txns.filter(t => t.type === 'Distribution').reduce((s, t) => s + t.amount, 0);
@@ -296,17 +302,22 @@ function InvestedCapitalGrouped({ txns, fundId, onExport }: GroupedTxnProps) {
           <div className="text-[13.5px] font-semibold">
             Invested Capital
             <span className="text-[#9b9890] font-normal text-[12px] ml-2">
-              {groups.length} compan{groups.length !== 1 ? 'ies' : 'y'} · {txns.length} transaction{txns.length !== 1 ? 's' : ''}
+              {groups.length}{groups.length !== allGroups.length ? ` of ${allGroups.length}` : ''} compan{allGroups.length !== 1 ? 'ies' : 'y'} · {txns.length} transaction{txns.length !== 1 ? 's' : ''}
             </span>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9b9890]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" value={search} onChange={e => onSearchChange(e.target.value)} placeholder="Search companies…" className="pl-8 pr-7 py-1.5 rounded-[7px] border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3] bg-white w-48" />
+              {search && <button onClick={() => onSearchChange('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#9b9890] hover:text-[#1a1917] text-[14px]">×</button>}
+            </div>
             <button onClick={handleExport} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↓ Export</button>
             <a href={`/funds/${fundId}/investments/new`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">+ New Company Investment</a>
           </div>
         </div>
         {groups.length === 0 ? (
           <div className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">
-            No transactions yet. Click "+ New Company Investment" to record your first investment.
+            {allGroups.length === 0 ? 'No transactions yet. Click "+ New Company Investment" to record your first investment.' : `No results for "${search}"`}
           </div>
         ) : (
           <table className="w-full border-collapse">
@@ -463,7 +474,9 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const [memberForm, setMemberForm] = useState<{ name: string; email: string; role: FundMemberRole; title: string } | null>(null);
   const [memberSaving, setMemberSaving] = useState(false);
   const [memberError, setMemberError] = useState<string | null>(null);
-  const [lpSearch, setLpSearch] = useState('');
+  const [lpSearch, setLpSearch]             = useState('');
+  const [portfolioSearch, setPortfolioSearch] = useState('');
+  const [investedSearch, setInvestedSearch]   = useState('');
   const [lpSort, setLpSort] = useState<'name-az' | 'name-za' | 'commitment-desc' | 'commitment-asc' | 'called-desc'>('name-az');
   const [loading, setLoading] = useState(true);
   // LP onboarding modals
@@ -665,13 +678,24 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
         const totalInvestedP = rows.reduce((s, r) => s + r.t.amount, 0);
         const totalCurrentInvVal = rows.reduce((s, r) => s + (r.currentInvValue || 0), 0);
         const totalDistrib = Object.values(distribByCompany).reduce((s, v) => s + v, 0);
+        const filteredRows = portfolioSearch
+          ? rows.filter(({ t, co }) =>
+              t.company_name.toLowerCase().includes(portfolioSearch.toLowerCase()) ||
+              (co?.sector || '').toLowerCase().includes(portfolioSearch.toLowerCase()))
+          : rows;
+
         return (
           <div>
             <p className="text-[12.5px] text-[#6b6860] mb-4">One row per investment transaction. MOIC = Current Investment Value ÷ Amount Invested.</p>
             <div className="bg-white border border-[#e8e6df] rounded-xl">
               <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
-                <div className="text-[13.5px] font-semibold">Portfolio Companies <span className="text-[#9b9890] font-normal text-[12px]">({companies.length} compan{companies.length !== 1 ? 'ies' : 'y'} · {rows.length} investment{rows.length !== 1 ? 's' : ''})</span></div>
-                <div className="flex gap-2">
+                <div className="text-[13.5px] font-semibold">Portfolio Companies <span className="text-[#9b9890] font-normal text-[12px]">({companies.length} compan{companies.length !== 1 ? 'ies' : 'y'} · {filteredRows.length}{filteredRows.length !== rows.length ? ` of ${rows.length}` : ''} investment{rows.length !== 1 ? 's' : ''})</span></div>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9b9890]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" value={portfolioSearch} onChange={e => setPortfolioSearch(e.target.value)} placeholder="Search companies…" className="pl-8 pr-7 py-1.5 rounded-[7px] border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3] bg-white w-48" />
+                    {portfolioSearch && <button onClick={() => setPortfolioSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#9b9890] hover:text-[#1a1917] text-[14px]">×</button>}
+                  </div>
                   <button onClick={() => {
                     const csvRows: string[][] = [
                       ['Company','Sector','Date','Instrument','Invested','Entry Valuation','Current Inv. Value','Current Co. Valuation','MOIC','IRR','Distributions','DPI','Status']
@@ -706,8 +730,8 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                 <table className="w-full border-collapse">
                   <thead><tr>{['Company','Sector','Date','Instrument','Invested','Entry Valuation','Current Inv. Value','Current Co. Valuation','MOIC','IRR','Distributions','DPI','Status'].map(h => (<th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">{h}</th>))}</tr></thead>
                   <tbody>
-                    {rows.length === 0 ? (<tr><td colSpan={13} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">No investments yet. Add companies from the Invested Capital tab.</td></tr>)
-                    : rows.map(({ t, co, entryVal, currentInvValue, currentCoVal, distribAmt, moic, dpi, irr }) => (
+                    {filteredRows.length === 0 ? (<tr><td colSpan={13} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">{rows.length === 0 ? 'No investments yet. Add companies from the Invested Capital tab.' : `No results for "${portfolioSearch}"`}</td></tr>)
+                    : filteredRows.map(({ t, co, entryVal, currentInvValue, currentCoVal, distribAmt, moic, dpi, irr }) => (
                       <tr key={t.id} className="hover:bg-[#f9f8f5] transition-colors">
                         <td className="px-4 py-2.5 border-b border-[#e8e6df]"><div className="flex items-center gap-2"><div className="w-6 h-6 rounded-[5px] flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: coColor(t.company_name) }}>{t.company_name.slice(0, 2).toUpperCase()}</div>{co ? <a href={`/funds/${id}/companies/${co.id}?from=portfolio`} className="font-medium text-[12.5px] text-[#2d5be3] hover:underline">{t.company_name}</a> : <span className="font-medium text-[12.5px]">{t.company_name}</span>}</div></td>
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{co?.sector || '—'}</td>
@@ -900,7 +924,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
       })()}
 
       {/* ══ INVESTED CAPITAL ══ */}
-      {tab === 'invested' && <InvestedCapitalGrouped txns={txns} fundId={id} onExport={() => {}} />}
+      {tab === 'invested' && <InvestedCapitalGrouped txns={txns} fundId={id} onExport={() => {}} search={investedSearch} onSearchChange={setInvestedSearch} />}
 
       {/* ══ EXPENSES ══ */}
       {tab === 'expenses' && (
