@@ -475,6 +475,8 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
         quarter:        derivedQuarter,
         quarter_end:    derivedQuarterEnd,
         value:          newVal,
+        moic:           newMoic,
+        irr:            years >= 1 ? newIrr : undefined,
         round:          valForm.round || undefined,
         notes:          valForm.notes ? `[${valForm.method}] ${valForm.notes}` : `[${valForm.method}]`,
         ...(companyVal ? { company_value: companyVal } as any : {}),
