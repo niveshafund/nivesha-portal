@@ -12,9 +12,8 @@ export type DbFund = {
   invested: number;
   nav: number;
   distributions: number;
-  moic: number;
-  irr: number;
-  dpi: number;
+  moic?: number;
+  irr?: number;
   management_fee: number;
   carried_interest: number;
   hurdle_rate: number;
@@ -91,8 +90,8 @@ export type DbCompany = {
   invested: number;
   unrealised: number;
   distributions: number;
-  moic: number;
-  irr: number;
+  moic?: number;
+  irr?: number;
   created_at: string;
   updated_at: string;
 };
@@ -134,8 +133,8 @@ export type DbValuation = {
   quarter: string;
   quarter_end: string;
   value: number;
-  moic: number;
-  irr: number;
+  moic?: number;
+  irr?: number;
   round?: string;
   notes?: string;
   company_value?: number;

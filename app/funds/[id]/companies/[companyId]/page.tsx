@@ -417,17 +417,15 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
         quarter:     editingVal.quarter,
         quarter_end: QUARTER_END[editingVal.quarter] ?? editingVal.quarter_end,
         value:       editingVal.value,
-        moic:        editingVal.moic,
-        irr:         editingVal.irr,
         round:       editingVal.round || undefined,
         notes:       editingVal.notes || undefined,
         ...(editCoVal ? { company_value: editCoVal } as any : {}),
       });
-      // Sync companies table
+      // Sync companies unrealised
+      const allVals = await getValuationsByCompany(companyId);
+      const totalUnrealised = allVals.reduce((s, v) => s + v.value, 0);
       await updateCompany(companyId, {
-        unrealised: editingVal.value,
-        moic: editingVal.moic,
-        irr: editingVal.irr,
+        unrealised: totalUnrealised,
         ...(editCoVal ? { valuation: editCoVal } : {}),
       });
       const [v, co] = await Promise.all([getValuationsByCompany(companyId), getCompanyById(companyId)]);
@@ -471,27 +469,22 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
         ? ((newVal / txnAmount) ** (1/years) - 1) * 100 : 0;
 
       await upsertValuation({
-        company_id:    companyId,
-        fund_id:       fundId,
+        company_id:     companyId,
+        fund_id:        fundId,
         transaction_id: valForm.transaction_id || undefined,
-        quarter:       derivedQuarter,
-        quarter_end:   derivedQuarterEnd,
-        value:         newVal,
-        moic:          newMoic,
-        irr:           newIrr,
-        round:         valForm.round || undefined,
-        notes:         valForm.notes ? `[${valForm.method}] ${valForm.notes}` : `[${valForm.method}]`,
+        quarter:        derivedQuarter,
+        quarter_end:    derivedQuarterEnd,
+        value:          newVal,
+        round:          valForm.round || undefined,
+        notes:          valForm.notes ? `[${valForm.method}] ${valForm.notes}` : `[${valForm.method}]`,
         ...(companyVal ? { company_value: companyVal } as any : {}),
       });
 
-      // Sync companies table with combined unrealised value
+      // Sync companies.unrealised with combined valuation value
       const allVals = await getValuationsByCompany(companyId);
       const totalUnrealised = allVals.reduce((s, v) => s + v.value, 0);
-      const blendedMoic = totalInvested > 0 ? totalUnrealised / totalInvested : newMoic;
       await updateCompany(companyId, {
         unrealised: totalUnrealised,
-        moic: blendedMoic,
-        irr: newIrr,
         ...(companyVal ? { valuation: companyVal } : {}),
       });
 
