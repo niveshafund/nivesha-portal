@@ -53,6 +53,10 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
     name: '', legalName: '', sector: '', stage: '', website: '', status: 'Active',
     ceoName: '', ceoEmail: '', ceoPhone: '',
     headline: '', about: '',
+    // Investment/round fields
+    investmentDate: '', securityType: '', round: '', invested: '',
+    valuation: '', valuationType: 'Post-money',
+    discount: '', valuationCap: '',
   });
 
   // New valuation form
@@ -137,17 +141,26 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       if (co) {
         setCompany(co);
         setForm({
-          name:     co.name,
-          legalName: (co as any).legal_name ?? '',
-          sector:   co.sector    ?? '',
-          stage:    co.stage     ?? '',
-          website:  co.website   ?? '',
-          status:   co.status,
-          ceoName:  co.contact_name  ?? '',
-          ceoEmail: co.contact_email ?? '',
-          ceoPhone: (co as any).contact_phone ?? '',
-          headline: co.headline  ?? '',
-          about:    co.about     ?? '',
+          name:          co.name,
+          legalName:     (co as any).legal_name ?? '',
+          sector:        co.sector    ?? '',
+          stage:         co.stage     ?? '',
+          website:       co.website   ?? '',
+          status:        co.status,
+          ceoName:       co.contact_name  ?? '',
+          ceoEmail:      co.contact_email ?? '',
+          ceoPhone:      (co as any).contact_phone ?? '',
+          headline:      co.headline  ?? '',
+          about:         co.about     ?? '',
+          // Investment fields
+          investmentDate: co.investment_date ?? '',
+          securityType:   co.security_type   ?? '',
+          round:          co.round           ?? '',
+          invested:       co.invested        ? String(co.invested) : '',
+          valuation:      co.valuation       ? String(co.valuation) : '',
+          valuationType:  co.valuation_type  ?? 'Post-money',
+          discount:       co.discount_pct    ? String(co.discount_pct) : '',
+          valuationCap:   co.valuation_cap   ? String(co.valuation_cap) : '',
         });
       }
 
@@ -261,16 +274,24 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
     setSaveError(null);
     try {
       const updated = await updateCompany(companyId, {
-        name:          form.name.trim(),
-        sector:        form.sector   || undefined,
-        stage:         form.stage    || undefined,
-        website:       form.website  || undefined,
-        status:        form.status   as any,
-        contact_name:  form.ceoName  || undefined,
-        contact_email: form.ceoEmail || undefined,
-        headline:      form.headline || undefined,
-        about:         form.about    || undefined,
-        ...(form.legalName ? { legal_name: form.legalName } as any : {}),
+        name:            form.name.trim(),
+        sector:          form.sector   || undefined,
+        stage:           form.stage    || undefined,
+        website:         form.website  || undefined,
+        status:          form.status   as any,
+        contact_name:    form.ceoName  || undefined,
+        contact_email:   form.ceoEmail || undefined,
+        headline:        form.headline || undefined,
+        about:           form.about    || undefined,
+        ...(form.legalName     ? { legal_name:      form.legalName }                    as any : {}),
+        ...(form.investmentDate? { investment_date:  form.investmentDate }               as any : {}),
+        ...(form.securityType  ? { security_type:    form.securityType }                as any : {}),
+        ...(form.round         ? { round:            form.round }                        as any : {}),
+        ...(form.invested      ? { invested:         Number(form.invested) }             as any : {}),
+        ...(form.valuation     ? { valuation:        Number(form.valuation),
+                                   valuation_type:   form.valuationType }               as any : {}),
+        ...(form.discount      ? { discount_pct:     Number(form.discount) }            as any : {}),
+        ...(form.valuationCap  ? { valuation_cap:    Number(form.valuationCap) }        as any : {}),
       });
       setCompany(updated);
       setEditing(false);
@@ -750,6 +771,61 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
               <div className="col-span-2">
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Investment Thesis / About</label>
                 <textarea value={form.about} onChange={set('about')} rows={4} className={inputCls + ' resize-y'} />
+              </div>
+
+              {/* ── Round / Investment Details ── */}
+              <div className="col-span-2 pt-3 border-t border-[#f0efe9]">
+                <div className="text-[12px] font-semibold text-[#6b6860] uppercase tracking-wide mb-3">Round Details</div>
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Investment Date</label>
+                <input type="date" value={form.investmentDate} onChange={set('investmentDate')} className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Security Type</label>
+                <select value={form.securityType} onChange={set('securityType')} className={inputCls}>
+                  <option value="">Select…</option>
+                  {['SAFE','Convertible Note','Preferred Stock','Common Stock'].map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Round</label>
+                <select value={form.round} onChange={set('round')} className={inputCls}>
+                  <option value="">Select…</option>
+                  {['Series Pre-seed','Series Seed','Series A','Series B','Series C','Series D','Series E','Growth Stage','Other'].map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Investment Amount (USD)</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
+                  <input type="number" value={form.invested} onChange={set('invested')} placeholder="0" className={inputCls + ' pl-6'} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Valuation</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
+                  <input type="number" value={form.valuation} onChange={set('valuation')} placeholder="0" className={inputCls + ' pl-6'} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Valuation Type</label>
+                <select value={form.valuationType} onChange={set('valuationType')} className={inputCls}>
+                  <option value="Pre-money">Pre-money</option>
+                  <option value="Post-money">Post-money</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Discount % <span className="font-normal">(SAFE/Note)</span></label>
+                <input type="number" value={form.discount} onChange={set('discount')} placeholder="e.g. 20" className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Valuation Cap <span className="font-normal">(SAFE/Note)</span></label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
+                  <input type="number" value={form.valuationCap} onChange={set('valuationCap')} placeholder="0" className={inputCls + ' pl-6'} />
+                </div>
               </div>
             </div>
           ) : (
