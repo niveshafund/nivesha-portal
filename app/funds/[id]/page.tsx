@@ -222,10 +222,10 @@ function InviteModal({ lp, onClose }: { lp: DbLP; onClose: () => void }) {
 type GroupedTxnProps = {
   txns: any[];
   fundId: string;
-  onImport: () => void;
+  onExport: () => void;
 };
 
-function InvestedCapitalGrouped({ txns, fundId, onImport }: GroupedTxnProps) {
+function InvestedCapitalGrouped({ txns, fundId, onExport }: GroupedTxnProps) {
   const groups = React.useMemo(() => {
     const map = new Map<string, { company_name: string; company_id: string | null; txns: any[] }>();
     txns.forEach(t => {
@@ -245,6 +245,43 @@ function InvestedCapitalGrouped({ txns, fundId, onImport }: GroupedTxnProps) {
   const fmtFull = (n: number) => `$${n.toLocaleString()}`;
   const fmtShort = (n: number) => n >= 1_000_000 ? `$${(n/1_000_000).toFixed(1)}m` : n >= 1_000 ? `$${(n/1_000).toFixed(0)}k` : `$${n.toLocaleString()}`;
 
+  function handleExport() {
+    const rows: string[][] = [
+      ['Company', 'Security Type', 'Amount', 'Year', 'Discount %', 'Valuation Cap', 'Total Invested', 'Latest Date']
+    ];
+    groups.forEach(g => {
+      const investments  = g.txns.filter(t => t.type === 'Investment');
+      const totalInv     = investments.reduce((s, t) => s + t.amount, 0);
+      const sortedTxns   = [...g.txns].sort((a, b) => b.date.localeCompare(a.date));
+      const latestDate   = sortedTxns[0]?.date || '';
+      const latestInv    = investments.sort((a, b) => b.date.localeCompare(a.date))[0];
+      const discountPct  = latestInv?.discount_pct  ?? '';
+      const valuationCap = latestInv?.valuation_cap ?? '';
+      const rounds       = investments.map(t => `${t.instrument || 'Investment'} $${t.amount} ${t.date?.slice(0,4) ?? ''}`).join(' | ');
+      rows.push([
+        g.company_name,
+        rounds,
+        String(totalInv),
+        latestDate?.slice(0, 4) ?? '',
+        String(discountPct),
+        String(valuationCap),
+        String(totalInv),
+        latestDate,
+      ]);
+    });
+    // Footer row
+    rows.push(['TOTAL', '', String(totalInvested), '', '', '', String(totalInvested), '']);
+
+    const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `invested-capital.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div>
       <div className="mb-4">
@@ -263,7 +300,7 @@ function InvestedCapitalGrouped({ txns, fundId, onImport }: GroupedTxnProps) {
             </span>
           </div>
           <div className="flex gap-2">
-            <button onClick={onImport} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↑ Import</button>
+            <button onClick={handleExport} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↓ Export</button>
             <a href={`/funds/${fundId}/investments/new`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">+ New Company Investment</a>
           </div>
         </div>
@@ -635,15 +672,41 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
               <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6df]">
                 <div className="text-[13.5px] font-semibold">Portfolio Companies <span className="text-[#9b9890] font-normal text-[12px]">({companies.length} compan{companies.length !== 1 ? 'ies' : 'y'} · {rows.length} investment{rows.length !== 1 ? 's' : ''})</span></div>
                 <div className="flex gap-2">
-                  <button onClick={() => setImportModal('companies')} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↑ Import</button>
-                  <Link href={`/funds/${id}/investments/new`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">+ Add Company</Link>
+                  <button onClick={() => {
+                    const csvRows: string[][] = [
+                      ['Company','Sector','Date','Instrument','Invested','Entry Valuation','Current Inv. Value','Current Co. Valuation','MOIC','IRR','Distributions','DPI','Status']
+                    ];
+                    rows.forEach(({ t, co, entryVal, currentInvValue, currentCoVal, distribAmt, moic, dpi, irr }) => {
+                      csvRows.push([
+                        t.company_name,
+                        co?.sector || '',
+                        t.date || '',
+                        t.instrument || '',
+                        String(t.amount),
+                        entryVal ? String(entryVal) : '',
+                        currentInvValue > 0 ? String(currentInvValue) : '',
+                        currentCoVal > 0 ? String(currentCoVal) : '',
+                        moic != null ? moic.toFixed(2) : '',
+                        irr  != null ? irr.toFixed(1)  : '',
+                        distribAmt > 0 ? String(distribAmt) : '',
+                        dpi  != null ? dpi.toFixed(2)  : '',
+                        co?.status ?? 'Active',
+                      ]);
+                    });
+                    const csv  = csvRows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+                    const blob = new Blob([csv], { type: 'text/csv' });
+                    const url  = URL.createObjectURL(blob);
+                    const a    = document.createElement('a');
+                    a.href = url; a.download = 'portfolio.csv'; a.click();
+                    URL.revokeObjectURL(url);
+                  }} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↓ Export</button>
                 </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse">
                   <thead><tr>{['Company','Sector','Date','Instrument','Invested','Entry Valuation','Current Inv. Value','Current Co. Valuation','MOIC','IRR','Distributions','DPI','Status'].map(h => (<th key={h} className="text-[11px] font-medium text-[#6b6860] text-left px-4 py-2.5 border-b border-[#e8e6df] bg-[#f9f8f5] whitespace-nowrap">{h}</th>))}</tr></thead>
                   <tbody>
-                    {rows.length === 0 ? (<tr><td colSpan={13} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">No investments yet. Click "+ Add Company" to record your first investment.</td></tr>)
+                    {rows.length === 0 ? (<tr><td colSpan={13} className="px-4 py-10 text-center text-[12.5px] text-[#9b9890]">No investments yet. Add companies from the Invested Capital tab.</td></tr>)
                     : rows.map(({ t, co, entryVal, currentInvValue, currentCoVal, distribAmt, moic, dpi, irr }) => (
                       <tr key={t.id} className="hover:bg-[#f9f8f5] transition-colors">
                         <td className="px-4 py-2.5 border-b border-[#e8e6df]"><div className="flex items-center gap-2"><div className="w-6 h-6 rounded-[5px] flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: coColor(t.company_name) }}>{t.company_name.slice(0, 2).toUpperCase()}</div>{co ? <a href={`/funds/${id}/companies/${co.id}?from=portfolio`} className="font-medium text-[12.5px] text-[#2d5be3] hover:underline">{t.company_name}</a> : <span className="font-medium text-[12.5px]">{t.company_name}</span>}</div></td>
@@ -837,7 +900,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
       })()}
 
       {/* ══ INVESTED CAPITAL ══ */}
-      {tab === 'invested' && <InvestedCapitalGrouped txns={txns} fundId={id} onImport={() => setImportModal('investments')} />}
+      {tab === 'invested' && <InvestedCapitalGrouped txns={txns} fundId={id} onExport={() => {}} />}
 
       {/* ══ EXPENSES ══ */}
       {tab === 'expenses' && (

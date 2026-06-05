@@ -173,8 +173,10 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       if (firstInvTxn) {
         setForm(f => ({
           ...f,
-          discount:     firstInvTxn.discount_pct  ? String(firstInvTxn.discount_pct)  : '',
-          valuationCap: firstInvTxn.valuation_cap ? String(firstInvTxn.valuation_cap) : '',
+          discount:       firstInvTxn.discount_pct  ? String(firstInvTxn.discount_pct)  : '',
+          valuationCap:   firstInvTxn.valuation_cap ? String(firstInvTxn.valuation_cap) : '',
+          // Use transaction date if company investment_date is not set
+          investmentDate: f.investmentDate || firstInvTxn.date || '',
         }));
       }
     } finally {
@@ -293,16 +295,24 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
         contact_email:   form.ceoEmail || undefined,
         headline:        form.headline || undefined,
         about:           form.about    || undefined,
-        ...(form.legalName     ? { legal_name:      form.legalName }                    as any : {}),
-        ...(form.investmentDate? { investment_date:  form.investmentDate }               as any : {}),
-        ...(form.securityType  ? { security_type:    form.securityType }                as any : {}),
-        ...(form.round         ? { round:            form.round }                        as any : {}),
-        ...(form.invested      ? { invested:         Number(form.invested) }             as any : {}),
-        ...(form.valuation     ? { valuation:        Number(form.valuation),
-                                   valuation_type:   form.valuationType }               as any : {}),
-        ...(form.discount      ? { discount_pct:     Number(form.discount) }            as any : {}),
-        ...(form.valuationCap  ? { valuation_cap:    Number(form.valuationCap) }        as any : {}),
+        ...(form.legalName      ? { legal_name:      form.legalName }               as any : {}),
+        ...(form.investmentDate ? { investment_date:  form.investmentDate }          as any : {}),
+        ...(form.securityType   ? { security_type:    form.securityType }            as any : {}),
+        ...(form.round          ? { round:            form.round }                   as any : {}),
+        ...(form.invested       ? { invested:         Number(form.invested) }        as any : {}),
+        ...(form.valuation      ? { valuation:        Number(form.valuation),
+                                    valuation_type:   form.valuationType }           as any : {}),
       });
+
+      // Update discount/cap and date on the first investment transaction
+      const firstInvTxn = txns.find(x => x.type === 'Investment');
+      if (firstInvTxn) {
+        await updateTransaction(firstInvTxn.id, {
+          ...(form.discount      ? { discount_pct:  Number(form.discount) }     as any : {}),
+          ...(form.valuationCap  ? { valuation_cap: Number(form.valuationCap) } as any : {}),
+          ...(form.investmentDate? { date:           form.investmentDate }       as any : {}),
+        });
+      }
       setCompany(updated);
       setEditing(false);
     } catch (err: any) {
@@ -829,13 +839,6 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
               <div>
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Discount % <span className="font-normal">(SAFE/Note)</span></label>
                 <input type="number" value={form.discount} onChange={set('discount')} placeholder="e.g. 20" className={inputCls} />
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Valuation Cap <span className="font-normal">(SAFE/Note)</span></label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
-                  <input type="number" value={form.valuationCap} onChange={set('valuationCap')} placeholder="0" className={inputCls + ' pl-6'} />
-                </div>
               </div>
             </div>
           ) : (
