@@ -1214,11 +1214,16 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                           className={inputCls + ' pl-6'} />
                       </div>
                       <p className="text-[11px] text-[#9b9890] mt-1">Your stake's current worth. Drives MOIC.</p>
-                      {valForm.investmentValue && Number(valForm.investmentValue) > 0 && totalInvested > 0 && (() => {
-                        const moic = Number(valForm.investmentValue) / totalInvested;
-                        const d = new Date(valForm.date); const inv = investmentTxns[0]?.date ? new Date(investmentTxns[0].date) : null;
+                      {valForm.investmentValue && Number(valForm.investmentValue) > 0 && (() => {
+                        const selectedTxn = valForm.transaction_id
+                          ? investmentTxns.find(t => t.id === valForm.transaction_id)
+                          : investmentTxns[0];
+                        const txnAmount = selectedTxn?.amount ?? totalInvested;
+                        const moic = txnAmount > 0 ? Number(valForm.investmentValue) / txnAmount : 0;
+                        const d = new Date(valForm.date);
+                        const inv = selectedTxn?.date ? new Date(selectedTxn.date) : null;
                         const yrs = inv ? (d.getTime()-inv.getTime())/(1000*60*60*24*365.25) : 0;
-                        const irr = yrs > 0.01 ? ((Number(valForm.investmentValue)/totalInvested)**(1/yrs)-1)*100 : null;
+                        const irr = yrs > 0.01 ? ((Number(valForm.investmentValue)/txnAmount)**(1/yrs)-1)*100 : null;
                         return <p className="text-[11.5px] mt-1">
                           <span className={`font-semibold ${moic>=1?'text-green-600':'text-red-500'}`}>MOIC: {moic.toFixed(2)}x</span>
                           {irr != null && <span className={`ml-2 font-semibold ${irr>=0?'text-green-600':'text-red-500'}`}>IRR: {irr.toFixed(1)}%</span>}
@@ -1289,7 +1294,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                           <div key={v.id} className="bg-[#f9f8f5] rounded-lg px-3 py-2">
                             <div className="flex justify-between mb-0.5">
                               <span className="text-[11px] font-medium">{v.quarter}</span>
-                              <span className={`text-[11px] font-semibold ${moicColor(v.moic)}`}>{v.moic>0?`${v.moic.toFixed(2)}x`:'—'}</span>
+                              <span className={`text-[11px] font-semibold ${moicColor(v.moic ?? 0)}`}>{(v.moic ?? 0)>0?`${(v.moic ?? 0).toFixed(2)}x`:'—'}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="font-mono text-[12px] font-semibold">{fmtFull(v.value)}</span>
@@ -1334,8 +1339,8 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] font-medium text-green-700">{fmtFull(v.value)}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] text-[#6b6860]">{(v as any).company_value ? fmtFull(Number((v as any).company_value)) : '—'}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{v.notes?.match(/^\[(.+?)\]/)?.[1] || '—'}</td>
-                  <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${moicColor(v.moic)}`}>{v.moic > 0 ? `${v.moic.toFixed(2)}x` : '—'}</td>
-                  <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${irrColor(v.irr)}`}>{v.irr !== 0 ? `${v.irr.toFixed(1)}%` : '—'}</td>
+                  <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${moicColor(v.moic ?? 0)}`}>{(v.moic ?? 0) > 0 ? `${(v.moic ?? 0).toFixed(2)}x` : '—'}</td>
+                  <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${irrColor(v.irr ?? 0)}`}>{(v.irr ?? 0) !== 0 ? `${(v.irr ?? 0).toFixed(1)}%` : '—'}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] text-[12px] text-[#6b6860]">{v.round || '—'}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df] whitespace-nowrap">
                     <div className="flex gap-2">
@@ -1391,7 +1396,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
               <div>
                 <label className="block text-[12px] font-medium mb-1">MOIC (auto-calculated)</label>
                 <div className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] bg-[#f9f8f5] text-[#6b6860]">
-                  {editingVal.moic > 0 ? editingVal.moic.toFixed(2) + 'x' : '—'}
+                  {(editingVal.moic ?? 0) > 0 ? (editingVal.moic ?? 0).toFixed(2) + 'x' : '—'}
                 </div>
               </div>
               <div>
