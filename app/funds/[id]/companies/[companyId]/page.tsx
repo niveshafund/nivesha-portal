@@ -281,14 +281,18 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
       setForm(f => ({ ...f, [k]: e.target.value }));
 
-  const handleDeleteCompany = async () => {
-    if (!confirm(`Delete ${company?.name ?? 'this company'}? This will also delete all its transactions and valuations. This cannot be undone.`)) return;
-    try {
-      await deleteCompany(companyId);
-      router.push(`/funds/${fundId}?tab=invested`);
-    } catch (err: any) {
-      alert('Failed to delete company: ' + err.message);
-    }
+  const handleDeleteCompany = () => {
+    withConfirm(
+      `Delete ${company?.name ?? 'this company'}? This will also delete all its transactions and valuations. This cannot be undone.`,
+      async () => {
+        try {
+          await deleteCompany(companyId);
+          router.push(`/funds/${fundId}?tab=invested`);
+        } catch (err: any) {
+          alert('Failed to delete company: ' + err.message);
+        }
+      }
+    );
   };
 
   const handleSave = async () => {
