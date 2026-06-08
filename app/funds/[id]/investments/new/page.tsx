@@ -180,9 +180,9 @@ export default function CreateInvestmentPage({ params }: { params: Promise<{ id:
           ? `SAFE: ${form.safeType}${form.discount ? ` | Discount: ${form.discount}%` : ''}`
           : undefined,
         invested:        Number(form.amount),
-        unrealised:      form.valuation ? Number(form.valuation) : Number(form.amount),
+        unrealised:      Number(form.amount),
         distributions:   0,
-        moic:            form.valuation ? Number(form.valuation) / Number(form.amount) : 1,
+        moic:            1,
         irr:             0,
       });
 

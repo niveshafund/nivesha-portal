@@ -369,6 +369,11 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       });
       const t = await getTransactionsByCompany(companyId);
       setTxns(t);
+      // Sync unrealised — only if no valuations exist (valuations take precedence)
+      if (vals.length === 0) {
+        const newUnrealised = t.filter(x => x.type === 'Investment').reduce((s, x) => s + x.amount, 0);
+        await updateCompany(companyId, { unrealised: newUnrealised });
+      }
       setNewTxnForm({ date: new Date().toISOString().split('T')[0], type: 'Investment', amount: '', instrument: 'SAFE', safeType: 'with valuation cap and discount', discount: '', valuationCap: '', valuationType: 'Post-money', sharePrice: '', numShares: '', description: '', round: '' });
       setShowAddTxnForm(false);
     } catch (err: any) {
@@ -382,7 +387,12 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
     withConfirm('Delete this transaction? This cannot be undone.', async () => {
       try {
         await deleteTransaction(txnId);
-        setTxns(t => t.filter(x => x.id !== txnId));
+        const remaining = txns.filter(x => x.id !== txnId);
+        setTxns(remaining);
+        if (vals.length === 0) {
+          const newUnrealised = remaining.filter(x => x.type === 'Investment').reduce((s, x) => s + x.amount, 0);
+          await updateCompany(companyId, { unrealised: newUnrealised });
+        }
       } catch (err: any) {
         alert('Failed to delete transaction: ' + err.message);
       }
@@ -400,7 +410,12 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
         instrument:  editingTxn.instrument,
         description: editingTxn.description || undefined,
       });
-      setTxns(t => t.map(x => x.id === updated.id ? updated : x));
+      const updatedTxns = txns.map(x => x.id === updated.id ? updated : x);
+      setTxns(updatedTxns);
+      if (vals.length === 0) {
+        const newUnrealised = updatedTxns.filter(x => x.type === 'Investment').reduce((s, x) => s + x.amount, 0);
+        await updateCompany(companyId, { unrealised: newUnrealised });
+      }
       setEditingTxn(null);
     } catch (err: any) {
       alert('Failed to update transaction: ' + err.message);
