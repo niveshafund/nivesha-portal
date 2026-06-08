@@ -356,7 +356,16 @@ export async function updateCompany(id: string, updates: Partial<DbCompany>): Pr
     .select()
     .single();
   if (error) throw error;
+  // Keep denormalized company_name in transactions in sync when name changes
+  if (updates.name) {
+    await supabase.from('transactions').update({ company_name: updates.name }).eq('company_id', id);
+  }
   return data;
+}
+
+export async function deleteCompany(id: string): Promise<void> {
+  const { error } = await supabase.from('companies').delete().eq('id', id);
+  if (error) throw error;
 }
 
 // ─── TRANSACTIONS ─────────────────────────────────────────────

@@ -4,11 +4,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import { can } from '@/lib/rbac';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Suspense } from 'react';
 import Link from 'next/link';
 import {
-  getCompanyById, updateCompany, getTransactionsByCompany,
+  getCompanyById, updateCompany, deleteCompany, getTransactionsByCompany,
   getValuationsByCompany, upsertValuation, updateTransaction, deleteTransaction, createTransaction, getCompanyUpdates,
   createCompanyUpdate, deleteCompanyUpdate,
   DbCompany, DbTransaction, DbValuation, DbCompanyUpdate,
@@ -37,6 +37,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   const { id: fundId, companyId } = React.use(params);
   const searchParams = useSearchParams();
   const fromTab = searchParams.get('from') || 'portfolio'; // 'portfolio' or 'invested'
+  const router = useRouter();
 
   const [tab, setTab]           = useState<Tab>('overview');
   const [company, setCompany]   = useState<DbCompany | null>(null);
@@ -279,6 +280,16 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   const set = (k: string) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
       setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const handleDeleteCompany = async () => {
+    if (!confirm(`Delete ${company?.name ?? 'this company'}? This will also delete all its transactions and valuations. This cannot be undone.`)) return;
+    try {
+      await deleteCompany(companyId);
+      router.push(`/funds/${fundId}?tab=invested`);
+    } catch (err: any) {
+      alert('Failed to delete company: ' + err.message);
+    }
+  };
 
   const handleSave = async () => {
     if (!form.name.trim()) return;
@@ -628,10 +639,16 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
           </div>
         </div>
         {fromTab === 'invested' && (
-          <button onClick={() => setEditing(!editing)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
-            {editing ? '✕ Cancel' : '✏️ Edit Company'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setEditing(!editing)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+              {editing ? '✕ Cancel' : '✏️ Edit Company'}
+            </button>
+            <button onClick={handleDeleteCompany}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-red-200 text-red-600 bg-white hover:bg-red-50 transition-colors">
+              🗑 Delete Company
+            </button>
+          </div>
         )}
       </div>
 
