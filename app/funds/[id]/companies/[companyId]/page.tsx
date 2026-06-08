@@ -743,9 +743,11 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                   onChange={e => setEditingTxn(t => t ? {...t, description: e.target.value} : null)}
                   className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
               </div>
-              {(editingTxn.instrument === 'SAFE' || editingTxn.instrument === 'Convertible Note') && (<>
+              {['SAFE','Convertible Note','Preferred Stock','Common Stock','Equity'].includes(editingTxn.instrument) && (
                 <div>
-                  <label className="block text-[12px] font-medium mb-1">Valuation Cap (optional)</label>
+                  <label className="block text-[12px] font-medium mb-1">
+                    {editingTxn.instrument === 'SAFE' || editingTxn.instrument === 'Convertible Note' ? 'Valuation Cap' : 'Post-money Valuation'} (optional)
+                  </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
                     <input type="number" value={(editingTxn as any).valuation_cap ?? ''}
@@ -754,6 +756,8 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                       className="w-full pl-6 pr-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
                   </div>
                 </div>
+              )}
+              {(editingTxn.instrument === 'SAFE' || editingTxn.instrument === 'Convertible Note') && (
                 <div>
                   <label className="block text-[12px] font-medium mb-1">Discount % (optional)</label>
                   <div className="relative">
@@ -764,7 +768,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">%</span>
                   </div>
                 </div>
-              </>)}
+              )}
             </div>
             <div className="flex justify-end gap-2">
               <button onClick={() => setEditingTxn(null)}
