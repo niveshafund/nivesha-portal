@@ -370,7 +370,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       const t = await getTransactionsByCompany(companyId);
       setTxns(t);
       // Sync unrealised — only if no valuations exist (valuations take precedence)
-      if (vals.length === 0) {
+      if (valuations.length === 0) {
         const newUnrealised = t.filter(x => x.type === 'Investment').reduce((s, x) => s + x.amount, 0);
         await updateCompany(companyId, { unrealised: newUnrealised });
       }
@@ -389,7 +389,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
         await deleteTransaction(txnId);
         const remaining = txns.filter(x => x.id !== txnId);
         setTxns(remaining);
-        if (vals.length === 0) {
+        if (valuations.length === 0) {
           const newUnrealised = remaining.filter(x => x.type === 'Investment').reduce((s, x) => s + x.amount, 0);
           await updateCompany(companyId, { unrealised: newUnrealised });
         }
@@ -412,7 +412,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       });
       const updatedTxns = txns.map(x => x.id === updated.id ? updated : x);
       setTxns(updatedTxns);
-      if (vals.length === 0) {
+      if (valuations.length === 0) {
         const newUnrealised = updatedTxns.filter(x => x.type === 'Investment').reduce((s, x) => s + x.amount, 0);
         await updateCompany(companyId, { unrealised: newUnrealised });
       }
