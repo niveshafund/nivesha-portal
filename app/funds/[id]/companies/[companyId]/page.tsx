@@ -404,11 +404,13 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
     setSavingTxnEdit(true);
     try {
       const updated = await updateTransaction(editingTxn.id, {
-        date:        editingTxn.date,
-        type:        editingTxn.type,
-        amount:      editingTxn.amount,
-        instrument:  editingTxn.instrument,
-        description: editingTxn.description || undefined,
+        date:          editingTxn.date,
+        type:          editingTxn.type,
+        amount:        editingTxn.amount,
+        instrument:    editingTxn.instrument,
+        description:   editingTxn.description || undefined,
+        discount_pct:  (editingTxn as any).discount_pct  ?? undefined,
+        valuation_cap: (editingTxn as any).valuation_cap ?? undefined,
       });
       const updatedTxns = txns.map(x => x.id === updated.id ? updated : x);
       setTxns(updatedTxns);
@@ -741,6 +743,28 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
                   onChange={e => setEditingTxn(t => t ? {...t, description: e.target.value} : null)}
                   className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
               </div>
+              {(editingTxn.instrument === 'SAFE' || editingTxn.instrument === 'Convertible Note') && (<>
+                <div>
+                  <label className="block text-[12px] font-medium mb-1">Valuation Cap (optional)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">$</span>
+                    <input type="number" value={(editingTxn as any).valuation_cap ?? ''}
+                      onChange={e => setEditingTxn(t => t ? {...t, valuation_cap: e.target.value ? Number(e.target.value) : null} as any : null)}
+                      placeholder="e.g. 10000000"
+                      className="w-full pl-6 pr-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[12px] font-medium mb-1">Discount % (optional)</label>
+                  <div className="relative">
+                    <input type="number" step="0.5" min="0" max="50" value={(editingTxn as any).discount_pct ?? ''}
+                      onChange={e => setEditingTxn(t => t ? {...t, discount_pct: e.target.value ? Number(e.target.value) : null} as any : null)}
+                      placeholder="e.g. 20"
+                      className="w-full px-3 py-2 pr-7 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9b9890] text-[12px]">%</span>
+                  </div>
+                </div>
+              </>)}
             </div>
             <div className="flex justify-end gap-2">
               <button onClick={() => setEditingTxn(null)}
