@@ -34,6 +34,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
 
   const [form, setForm] = useState({
     name: '', email: '', phone: '', type: 'Individual',
+    entityName: '',
     commitment: '', joinDate: '',
     addressLine1: '', addressLine2: '', city: '',
     state: '', zip: '', country: 'USA', notes: '', gp_contact: '',
@@ -80,7 +81,8 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
           state:        lpData.state ?? '',
           zip:          lpData.zip ?? '',
           country:      lpData.country ?? 'USA',
-          notes:        lpData.notes ?? '',
+          notes:        lpData.notes?.replace(/^(Institution|Family Office|Corporate):[^\n|]+[\n|]?\s*/, '') ?? '',
+          entityName:   (() => { const m = lpData.notes?.match(/^(Institution|Family Office|Corporate):\s*([^\n|]+)/); return m ? m[2].trim() : ''; })(),
           gp_contact:   lpData.gp_contact ?? '',
         });
       }
@@ -229,7 +231,9 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
         state:         form.state || undefined,
         zip:           form.zip || undefined,
         country:       form.country || undefined,
-        notes:         form.notes || undefined,
+        notes:         form.type !== 'Individual' && form.entityName
+                         ? `${form.type}: ${form.entityName}${form.notes ? '\n' + form.notes : ''}`
+                         : form.notes || undefined,
         gp_contact:    form.gp_contact || undefined,
       });
       setLP(updated);
@@ -493,6 +497,24 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
         <div className="grid grid-cols-2 gap-x-8 gap-y-4">
           {editing ? (
             <>
+              <div className="col-span-2">
+                <label className="block text-[12px] font-medium text-[#9b9890] mb-2">Investor Type</label>
+                <div className="flex gap-2 flex-wrap">
+                  {(['Individual','Institution','Family Office','Corporate'] as const).map(t => (
+                    <button key={t} type="button"
+                      onClick={() => setForm(f => ({...f, type: t}))}
+                      className={`px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border transition-colors ${form.type === t ? 'bg-[#2d5be3] text-white border-[#2d5be3]' : 'bg-white text-[#1a1915] border-[#e8e6df] hover:bg-[#f9f8f5]'}`}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {form.type !== 'Individual' && (
+                <div className="col-span-2">
+                  <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Entity Name</label>
+                  <input value={form.entityName} onChange={set('entityName')} placeholder="e.g. Acme Capital LLC" className={inputCls} />
+                </div>
+              )}
               <div>
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Name</label>
                 <input value={form.name} onChange={set('name')} className={inputCls} />
