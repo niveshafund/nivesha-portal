@@ -654,17 +654,22 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
           const entryVal = t.valuation_cap ?? null;
           // Prefer transaction-level valuation, fall back to company-level
           const latestVal = latestValByTxn[t.id] ?? (t.company_id ? latestValByCompany[t.company_id] : null);
-          const currentCoVal = (latestVal as any)?.company_value ?? co?.valuation ?? entryVal ?? 0;
-          // Calculate current investment value based on ownership % at entry
-          // ownership = amount invested / entry valuation cap
-          // current value = ownership % * current company valuation
+          const hasRealValuation = !!(latestVal?.value && latestVal.value > 0);
+          const currentCoVal = hasRealValuation
+            ? ((latestVal as any)?.company_value ?? co?.valuation ?? 0)
+            : 0;
+          // Only prorate ownership if a real valuation entry exists.
+          // Without a valuation, current value = invested amount (1.00x cost basis).
           const currentInvValue = (() => {
-            if (entryVal && entryVal > 0 && currentCoVal > 0) {
+            if (hasRealValuation) {
+              // Transaction-level valuation: use directly
+              if (latestVal!.value > 0) return latestVal!.value;
+            }
+            if (hasRealValuation && entryVal && entryVal > 0 && currentCoVal > 0) {
               const ownershipPct = t.amount / entryVal;
               return ownershipPct * currentCoVal;
             }
-            // Fallback: use latest valuation value proportionally if multiple investments
-            if (latestVal?.value && latestVal.value > 0) return latestVal.value;
+            // No valuation: show cost basis (1.00x)
             return t.amount;
           })();
           const distribAmt = distribByCompany[t.company_id!] ?? 0;
