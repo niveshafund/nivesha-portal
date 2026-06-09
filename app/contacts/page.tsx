@@ -184,7 +184,36 @@ export default function ContactsPage() {
       }));
 
     const additional = (contactsData ?? []) as Contact[];
-    setContacts([...primaryCompany, ...primaryLP, ...additional]);
+
+    // Deduplicate: if a real contact row exists with the same email, prefer it over the virtual primary
+    const additionalEmails = new Set(additional.map(c => c.email?.toLowerCase()).filter(Boolean));
+    const additionalLpEmails = new Set(
+      additional.filter(c => c.contact_type === 'lp').map(c => c.email?.toLowerCase()).filter(Boolean)
+    );
+    const dedupedCompany = primaryCompany.filter(c => !c.email || !additionalEmails.has(c.email.toLowerCase()));
+    const dedupedLP = primaryLP.filter(c => !c.email || !additionalLpEmails.has(c.email.toLowerCase()));
+
+    // Deduplicate within primaryLP itself (same name + phone or same email)
+    const seenLP = new Set<string>();
+    const uniquePrimaryLP = dedupedLP.filter(c => {
+      const key = c.email
+        ? c.email.toLowerCase()
+        : `${c.first_name?.toLowerCase()}|${c.phone ?? ''}`;
+      if (seenLP.has(key)) return false;
+      seenLP.add(key);
+      return true;
+    });
+
+    // Also deduplicate within additional contacts themselves (same email = keep first)
+    const seenEmails = new Set<string>();
+    const dedupedAdditional = additional.filter(c => {
+      const key = (c.email ?? '').toLowerCase() + '|' + (c.contact_type ?? '');
+      if (seenEmails.has(key)) return false;
+      seenEmails.add(key);
+      return true;
+    });
+
+    setContacts([...dedupedCompany, ...uniquePrimaryLP, ...dedupedAdditional]);
     setLoading(false);
   }
 
@@ -367,13 +396,31 @@ export default function ContactsPage() {
 
       if (toInsert.length === 0) throw new Error('No valid rows found in file');
 
-      const { error } = await supabase.from('contacts').insert(toInsert);
+      // Fetch existing contacts to skip duplicates (same email + contact_type)
+      const { data: existing } = await supabase.from('contacts').select('email, contact_type');
+      const existingKeys = new Set((existing ?? []).map((c: any) => `${c.email?.toLowerCase()}|${c.contact_type}`));
+      const newRows = toInsert.filter(r => {
+        const key = `${r.email?.toLowerCase()}|${r.contact_type}`;
+        return !r.email || !existingKeys.has(key);
+      });
+
+      if (newRows.length === 0) {
+        setShowImport(false);
+        setImportFile(null);
+        await loadAll();
+        setSuccessMsg('No new contacts to import (all duplicates skipped)');
+        setTimeout(() => setSuccessMsg(''), 3000);
+        return;
+      }
+
+      const { error } = await supabase.from('contacts').insert(newRows);
       if (error) throw error;
 
       setShowImport(false);
       setImportFile(null);
       await loadAll();
-      setSuccessMsg(`Imported ${toInsert.length} contacts`);
+      const skipped = toInsert.length - newRows.length;
+      setSuccessMsg(`Imported ${newRows.length} contacts${skipped > 0 ? ` (${skipped} duplicates skipped)` : ''}`);
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err: any) {
       setImportError(err.message || 'Import failed');
