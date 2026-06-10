@@ -496,7 +496,19 @@ export async function upsertValuation(
     .upsert(valuation, { onConflict: conflictKey })
     .select()
     .single();
-  if (error) throw error;
+  if (error) {
+    // If conflict key fails (missing constraint), fall back to plain insert
+    if (error.code === '42P10' || error.message?.includes('no unique or exclusion constraint')) {
+      const { data: inserted, error: insertError } = await supabase
+        .from('valuations')
+        .insert(valuation)
+        .select()
+        .single();
+      if (insertError) throw insertError;
+      return inserted;
+    }
+    throw error;
+  }
   return data;
 }
 
