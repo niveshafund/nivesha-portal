@@ -654,7 +654,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
           const entryVal = t.valuation_cap ?? null;
           // Prefer transaction-level valuation, fall back to company-level
           const latestVal = latestValByTxn[t.id] ?? (t.company_id ? latestValByCompany[t.company_id] : null);
-          const hasRealValuation = !!(latestVal?.value && latestVal.value > 0);
+          const hasRealValuation = latestVal != null && latestVal.value != null;
           const currentCoVal = hasRealValuation
             ? ((latestVal as any)?.company_value ?? co?.valuation ?? 0)
             : 0;
@@ -662,10 +662,10 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
           // Without a valuation, current value = invested amount (1.00x cost basis).
           const currentInvValue = (() => {
             if (hasRealValuation) {
-              // Transaction-level valuation: use directly
-              if (latestVal!.value > 0) return latestVal!.value;
+              // Transaction-level valuation: use directly (including 0 for write-offs)
+              return latestVal!.value;
             }
-            if (hasRealValuation && entryVal && entryVal > 0 && currentCoVal > 0) {
+            if (entryVal && entryVal > 0 && currentCoVal > 0) {
               const ownershipPct = t.amount / entryVal;
               return ownershipPct * currentCoVal;
             }
@@ -673,11 +673,11 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
             return t.amount;
           })();
           const distribAmt = distribByCompany[t.company_id!] ?? 0;
-          const moic = currentInvValue > 0 && t.amount > 0 ? currentInvValue / t.amount : null;
+          const moic = currentInvValue != null && t.amount > 0 ? currentInvValue / t.amount : null;
           const dpi = t.amount > 0 && distribAmt > 0 ? distribAmt / t.amount : null;
           const investDate = t.date ? new Date(t.date) : null;
           const years = investDate ? (new Date().getTime() - investDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25) : 0;
-          const irr = years > 0.01 && currentInvValue > 0 && t.amount > 0 ? ((currentInvValue / t.amount) ** (1 / years) - 1) * 100 : null;
+          const irr = years > 0.01 && t.amount > 0 && hasRealValuation ? (currentInvValue === 0 ? -100 : ((currentInvValue / t.amount) ** (1 / years) - 1) * 100) : null;
           return { t, co, entryVal, currentInvValue, currentCoVal, distribAmt, moic, dpi, irr };
         });
         const totalInvestedP = rows.reduce((s, r) => s + r.t.amount, 0);
@@ -744,7 +744,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
                         <td className="px-4 py-2.5 border-b border-[#e8e6df]"><span className="px-1.5 py-0.5 rounded text-[10px] bg-[#f9f8f5] text-[#6b6860] border border-[#e8e6df] whitespace-nowrap">{t.instrument}</span></td>
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtFull(t.amount)}</td>
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{entryVal ? fmtFull(entryVal) : '—'}</td>
-                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] text-green-700">{currentInvValue > 0 ? fmtFull(currentInvValue) : '—'}</td>
+                        <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] text-green-700">{fmtFull(currentInvValue)}</td>
                         <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] text-[#6b6860]">{currentCoVal > 0 ? fmtFull(currentCoVal) : '—'}</td>
                         <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12.5px] ${moic != null ? moicColor(moic) : 'text-[#9b9890]'}`}>{moic != null ? `${moic.toFixed(2)}x` : '—'}</td>
                         <td className={`px-4 py-2.5 border-b border-[#e8e6df] text-[12px] ${irr != null && irr > 0 ? 'text-green-600' : irr != null && irr < 0 ? 'text-red-600' : 'text-[#9b9890]'}`}>{irr != null ? `${irr.toFixed(1)}%` : '—'}</td>
