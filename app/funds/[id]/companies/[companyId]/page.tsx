@@ -308,6 +308,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
         status:          form.status   as any,
         contact_name:    form.ceoName  || undefined,
         contact_email:   form.ceoEmail || undefined,
+        contact_phone:   form.ceoPhone || undefined,
         headline:        form.headline || undefined,
         about:           form.about    || undefined,
         ...(form.legalName      ? { legal_name:      form.legalName }               as any : {}),
