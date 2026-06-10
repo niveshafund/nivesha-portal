@@ -232,7 +232,7 @@ export default function AnalyticsPage() {
                     dataKey="value" nameKey="name" paddingAngle={2}>
                     {pieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                   </Pie>
-                  <Tooltip formatter={(v: number) => fmtFull(v)} />
+                  <Tooltip formatter={(v: any) => fmtFull(Number(v))} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2">
@@ -256,7 +256,7 @@ export default function AnalyticsPage() {
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0efe9" />
                   <XAxis type="number" tickFormatter={v => fmt(v)} tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} />
                   <YAxis type="category" dataKey="key" tick={{ fontSize: 11, fill: '#6b6860' }} axisLine={false} tickLine={false} width={80} />
-                  <Tooltip formatter={(v: number) => fmtFull(v)} />
+                  <Tooltip formatter={(v: any) => fmtFull(Number(v))} />
                   <Bar dataKey="invested" radius={[0, 4, 4, 0]}>
                     {groups.map((g, i) => <Cell key={i} fill={g.color} />)}
                   </Bar>
@@ -398,7 +398,7 @@ export default function AnalyticsPage() {
                 <XAxis type="number" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false}
                   tickFormatter={v => metric === 'moic' ? `${v.toFixed(1)}x` : `${v.toFixed(0)}%`} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#6b6860' }} axisLine={false} tickLine={false} width={120} />
-                <Tooltip formatter={(v: number) => metric === 'moic' ? `${v.toFixed(2)}x` : `${v.toFixed(1)}%`} />
+                <Tooltip formatter={(v: any) => metric === 'moic' ? `${Number(v).toFixed(2)}x` : `${Number(v).toFixed(1)}%`} />
                 <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                   {barRows.map((r, i) => {
                     const globalIdx = ranked.findIndex(rr => rr.company.id === r.company.id);
