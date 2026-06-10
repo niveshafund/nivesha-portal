@@ -8,8 +8,7 @@ import { supabase } from '@/lib/supabase';
 const mainNav = [
   { href: '/dashboard',       label: 'Dashboard',          icon: 'grid' },
   { href: '/funds',           label: 'Funds',              icon: 'briefcase' },
-  { href: '/metrics',         label: 'Metrics Data',       icon: 'bar-chart',  disabled: true },
-  { href: '/analytics',       label: 'Analytics',          icon: 'globe',      disabled: true },
+  { href: '/analytics',       label: 'Analytics',          icon: 'globe' },
   { href: '/reports',         label: 'Reports',            icon: 'file-text',  disabled: true },
 ];
 
