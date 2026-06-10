@@ -27,6 +27,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
   const [txns, setTxns] = useState<DbLPTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
+  const investorDetailsRef = React.useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const [showAddTxn, setShowAddTxn] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -347,7 +348,13 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
         </div>
         <div className="flex gap-2">
           <button onClick={handleExport} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">↓ Export</button>
-          <button onClick={() => setEditing(!editing)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+          <button onClick={() => {
+            setEditing(e => {
+              const next = !e;
+              if (next) setTimeout(() => investorDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+              return next;
+            });
+          }} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
             {editing ? '✕ Cancel Edit' : '✏️ Edit LP'}
           </button>
         </div>
@@ -485,6 +492,7 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
       {/* LP Details */}
       <div className="bg-white border border-[#e8e6df] rounded-xl p-6 mb-6">
         <div className="flex items-center justify-between mb-5">
+          <div ref={investorDetailsRef} />
           <h2 className="text-[15px] font-semibold">Investor Details</h2>
           {editing && (
             <button onClick={handleSave} disabled={saving}
