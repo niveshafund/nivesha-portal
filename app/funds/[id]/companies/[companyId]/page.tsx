@@ -609,13 +609,13 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
   const totalInvested     = txns.filter(t => t.type === 'Investment').reduce((s,t) => s + t.amount, 0);
   const latestVal         = valuations[0] ?? null;
   const investmentTxns    = txns.filter(t => t.type === 'Investment').sort((a,b) => a.date.localeCompare(b.date));
-  const currentValue      = latestVal ? latestVal.value : (company.unrealised || 0);
-  const computedMoic      = currentValue > 0 && totalInvested > 0 ? currentValue / totalInvested : null;
+  const currentValue      = latestVal != null ? latestVal.value : (company.unrealised ?? 0);
+  const computedMoic      = latestVal != null && totalInvested > 0 ? currentValue / totalInvested : (totalInvested > 0 && company.unrealised != null ? currentValue / totalInvested : null);
   const investDate        = investmentTxns[0]?.date ? new Date(investmentTxns[0].date) : null;
   const today             = new Date();
   const years             = investDate ? (today.getTime() - investDate.getTime()) / (1000*60*60*24*365.25) : 0;
-  const computedIrr       = years > 0.01 && currentValue > 0 && totalInvested > 0
-    ? ((currentValue / totalInvested) ** (1/years) - 1) * 100 : null;
+  const computedIrr       = years > 0.01 && totalInvested > 0 && latestVal != null
+    ? (currentValue === 0 ? -100 : ((currentValue / totalInvested) ** (1/years) - 1) * 100) : null;
 
   const tabs: { key: Tab; label: string }[] = fromTab === 'invested'
     ? [
@@ -677,7 +677,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       <div className="grid grid-cols-4 gap-3 mb-4">
         {[
           { label: 'Invested Capital', value: fmtFull(totalInvested), cls: '' },
-          { label: 'Current Value',    value: currentValue > 0 ? fmtFull(currentValue) : '—', cls: '' },
+          { label: 'Current Value',    value: latestVal != null ? fmtFull(currentValue) : (company.unrealised != null ? fmtFull(company.unrealised) : '—'), cls: '' },
           { label: 'MOIC',             value: computedMoic != null ? `${computedMoic.toFixed(2)}x` : '—', cls: computedMoic != null ? moicColor(computedMoic) : 'text-[#9b9890]' },
           { label: 'IRR',              value: computedIrr != null ? `${computedIrr.toFixed(1)}%` : '—', cls: computedIrr != null ? irrColor(computedIrr) : 'text-[#9b9890]' },
         ].map(k => (
