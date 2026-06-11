@@ -181,7 +181,7 @@ function CompanySnapshot({
               { label: 'Company Name',   value: co.name },
               { label: 'Board Seats',    value: '—' },
               { label: 'Sector',         value: co.sector ?? '—' },
-              { label: 'Headquarters',   value: co.city ? `${co.city}${co.us_state ? ', ' + co.us_state : ''}` : '—' },
+              { label: 'Headquarters',   value: co.country ?? '—' },
               { label: 'Status',         value: co.status },
               { label: 'Founded',        value: co.investment_date ? co.investment_date.slice(0, 4) : '—' },
               { label: 'Fund Ownership', value: '—' },
