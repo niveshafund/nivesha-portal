@@ -48,6 +48,7 @@ export default function AnalyticsPage() {
   const [metric, setMetric] = useState<Metric>('moic');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [groupByCompany, setGroupByCompany] = useState<'none' | 'sector' | 'stage'>('none');
+  const [groupFilter, setGroupFilter] = useState<string>('all');
 
   useEffect(() => {
     (async () => {
@@ -98,7 +99,7 @@ export default function AnalyticsPage() {
     }
     const dpi = totalInvested > 0 ? distributions / totalInvested : 0;
     return { company: co, totalInvested, currentValue, distributions, moic, irr, dpi };
-  }).filter(r => r.totalInvested > 0);
+  }).filter(r => r.totalInvested > 0 && !!r.company.id);
 
   // ── ALLOCATION TAB ──────────────────────────────────────────────────────────
 
@@ -136,7 +137,16 @@ export default function AnalyticsPage() {
 
   // ── PORTFOLIO COMPANIES TAB ────────────────────────────────────────────────
 
-  const sortedRows = [...companyRows].sort((a, b) => {
+  // Filter by group selection + specific value
+  const filteredRows = groupByCompany === 'none'
+    ? companyRows
+    : companyRows.filter(r => {
+        const val = groupByCompany === 'sector' ? r.company.sector : r.company.stage;
+        if (!val) return false;
+        return groupFilter === 'all' || val === groupFilter;
+      });
+
+  const sortedRows = [...filteredRows].sort((a, b) => {
     const av = metric === 'moic' ? a.moic : (a.irr ?? -999);
     const bv = metric === 'moic' ? b.moic : (b.irr ?? -999);
     return sortDir === 'desc' ? bv - av : av - bv;
@@ -145,10 +155,11 @@ export default function AnalyticsPage() {
   const topPerformer = [...companyRows].sort((a, b) => b.moic - a.moic)[0];
   const needsAttention = [...companyRows].filter(r => r.company.status !== 'Written Off').sort((a, b) => a.moic - b.moic)[0];
 
-  const avgMoic = companyRows.length > 0 ? companyRows.reduce((s, r) => s + r.moic, 0) / companyRows.length : 0;
-  const irrRows = companyRows.filter(r => r.irr != null);
+  const activeRows = groupByCompany === 'none' ? companyRows : filteredRows;
+  const avgMoic = activeRows.length > 0 ? activeRows.reduce((s, r) => s + r.moic, 0) / activeRows.length : 0;
+  const irrRows = activeRows.filter(r => r.irr != null);
   const avgIrr = irrRows.length > 0 ? irrRows.reduce((s, r) => s + r.irr!, 0) / irrRows.length : null;
-  const avgDpi = companyRows.length > 0 ? companyRows.reduce((s, r) => s + r.dpi, 0) / companyRows.length : 0;
+  const avgDpi = activeRows.length > 0 ? activeRows.reduce((s, r) => s + r.dpi, 0) / activeRows.length : 0;
 
   // Bar chart — top 20 by selected metric
   const barRows = sortedRows.slice(0, 20);
@@ -342,11 +353,20 @@ export default function AnalyticsPage() {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[12.5px] text-[#6b6860]">Group by</span>
-              <select value={groupByCompany} onChange={e => setGroupByCompany(e.target.value as any)} className={inputCls}>
+              <select value={groupByCompany} onChange={e => { setGroupByCompany(e.target.value as any); setGroupFilter('all'); }} className={inputCls}>
                 <option value="none">None</option>
                 <option value="sector">Sector</option>
                 <option value="stage">Stage</option>
               </select>
+              {groupByCompany !== 'none' && (() => {
+                const opts = [...new Set(companyRows.map(r => (groupByCompany === 'sector' ? r.company.sector : r.company.stage) ?? '').filter(Boolean))].sort();
+                return (
+                  <select value={groupFilter} onChange={e => setGroupFilter(e.target.value)} className={inputCls}>
+                    <option value="all">All {groupByCompany === 'sector' ? 'sectors' : 'stages'}</option>
+                    {opts.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                );
+              })()}
             </div>
             <div className="flex items-center gap-2 ml-auto">
               <span className="text-[12.5px] text-[#6b6860]">Sort</span>
@@ -360,7 +380,7 @@ export default function AnalyticsPage() {
           {/* KPI tiles */}
           <div className="grid grid-cols-4 gap-3 mb-6">
             {[
-              { label: 'Companies',  value: companyRows.length.toString() },
+              { label: 'Companies',  value: activeRows.length.toString() },
               { label: 'Avg MOIC',   value: `${avgMoic.toFixed(2)}x` },
               { label: 'Avg DPI',    value: `${avgDpi.toFixed(2)}x` },
               { label: 'Avg IRR',    value: avgIrr != null ? `${avgIrr.toFixed(1)}%` : '—' },
