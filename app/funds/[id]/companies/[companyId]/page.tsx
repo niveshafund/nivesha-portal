@@ -1425,74 +1425,90 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       )}
 
       {/* ── Edit Valuation Modal ── */}
-      {editingVal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditingVal(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6">
-            <h3 className="text-[16px] font-semibold mb-4">Edit Valuation — {editingVal.quarter}</h3>
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-[12px] font-medium mb-1">Quarter</label>
-                <select value={editingVal.quarter}
-                  onChange={e => setEditingVal(v => v ? {...v, quarter: e.target.value} : null)}
-                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
-                  {QUARTERS.map(q => <option key={q} value={q}>{q}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium mb-1">Investment Value (USD) *</label>
-                <p className="text-[11px] text-[#9b9890] mb-1">Your stake's current worth</p>
-                <input type="number" value={editingVal.value}
-                  onChange={e => {
-                    const newVal = Number(e.target.value);
-                    const newMoic = totalInvested > 0 ? newVal / totalInvested : 0;
-                    const yrs = years;
-                    const newIrr = yrs > 0.01 && newVal > 0 && totalInvested > 0
-                      ? ((newVal / totalInvested) ** (1/yrs) - 1) * 100 : 0;
-                    setEditingVal(v => v ? {...v, value: newVal, moic: newMoic, irr: newIrr} : null);
-                  }}
-                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium mb-1">Total Company Value (optional)</label>
-                <p className="text-[11px] text-[#9b9890] mb-1">100% enterprise value</p>
-                <input type="number" value={(editingVal as any).company_value || ''}
-                  onChange={e => setEditingVal(v => v ? {...v, company_value: e.target.value} as any : null)}
-                  className="w-full px-3 py-2 rounded-[7px] border border-dashed border-[#c8c6bf] text-[13px] outline-none focus:border-[#2d5be3]" />
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium mb-1">MOIC (auto-calculated)</label>
-                <div className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] bg-[#f9f8f5] text-[#6b6860]">
-                  {(editingVal.moic ?? 0) > 0 ? (editingVal.moic ?? 0).toFixed(2) + 'x' : '—'}
+      {editingVal && (() => {
+        // Parse stored notes: "[Method] user notes" → separate method + clean notes
+        const storedNotes = editingVal.notes ?? '';
+        const methodMatch = storedNotes.match(/^\[(.+?)\](.*)/s);
+        const parsedMethod = methodMatch ? methodMatch[1] : 'Recent Funding Round';
+        const parsedNotes  = methodMatch ? methodMatch[2].trim() : storedNotes;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditingVal(null)} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6">
+              <h3 className="text-[16px] font-semibold mb-4">Edit Valuation — {editingVal.quarter}</h3>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block text-[12px] font-medium mb-1">Quarter</label>
+                  <select value={editingVal.quarter}
+                    onChange={e => setEditingVal(v => v ? {...v, quarter: e.target.value} : null)}
+                    className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
+                    {QUARTERS.map(q => <option key={q} value={q}>{q}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[12px] font-medium mb-1">Investment Value (USD) *</label>
+                  <p className="text-[11px] text-[#9b9890] mb-1">Your stake's current worth</p>
+                  <input type="number" value={editingVal.value}
+                    onChange={e => {
+                      const newVal = Number(e.target.value);
+                      const newMoic = totalInvested > 0 ? newVal / totalInvested : 0;
+                      const yrs = years;
+                      const newIrr = yrs > 0.01 && newVal > 0 && totalInvested > 0
+                        ? ((newVal / totalInvested) ** (1/yrs) - 1) * 100 : 0;
+                      setEditingVal(v => v ? {...v, value: newVal, moic: newMoic, irr: newIrr} : null);
+                    }}
+                    className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
+                </div>
+                <div>
+                  <label className="block text-[12px] font-medium mb-1">Total Company Value (optional)</label>
+                  <p className="text-[11px] text-[#9b9890] mb-1">100% enterprise value</p>
+                  <input type="number" value={(editingVal as any).company_value || ''}
+                    onChange={e => setEditingVal(v => v ? {...v, company_value: e.target.value} as any : null)}
+                    className="w-full px-3 py-2 rounded-[7px] border border-dashed border-[#c8c6bf] text-[13px] outline-none focus:border-[#2d5be3]" />
+                </div>
+                <div>
+                  <label className="block text-[12px] font-medium mb-1">MOIC (auto-calculated)</label>
+                  <div className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] bg-[#f9f8f5] text-[#6b6860]">
+                    {(editingVal.moic ?? 0) > 0 ? (editingVal.moic ?? 0).toFixed(2) + 'x' : '—'}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[12px] font-medium mb-1">Round</label>
+                  <select value={editingVal.round || ''}
+                    onChange={e => setEditingVal(v => v ? {...v, round: e.target.value} : null)}
+                    className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
+                    <option value="">Select…</option>
+                    {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[12px] font-medium mb-1">Notes</label>
+                  <input
+                    value={parsedNotes}
+                    onChange={e => {
+                      const userNotes = e.target.value;
+                      const combined = userNotes.trim()
+                        ? `[${parsedMethod}] ${userNotes}`
+                        : `[${parsedMethod}]`;
+                      setEditingVal(v => v ? {...v, notes: combined} : null);
+                    }}
+                    placeholder="Document assumptions…"
+                    className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
                 </div>
               </div>
-              <div>
-                <label className="block text-[12px] font-medium mb-1">Round</label>
-                <select value={editingVal.round || ''}
-                  onChange={e => setEditingVal(v => v ? {...v, round: e.target.value} : null)}
-                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]">
-                  <option value="">Select…</option>
-                  {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setEditingVal(null)}
+                  className="px-4 py-2 rounded-[7px] text-[13px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">Cancel</button>
+                <button onClick={handleSaveValEdit} disabled={savingValEdit}
+                  className="px-4 py-2 rounded-[7px] text-[13px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
+                  {savingValEdit ? 'Saving...' : 'Save Changes'}
+                </button>
               </div>
-              <div>
-                <label className="block text-[12px] font-medium mb-1">Notes</label>
-                <input value={editingVal.notes || ''}
-                  onChange={e => setEditingVal(v => v ? {...v, notes: e.target.value} : null)}
-                  className="w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3]" />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setEditingVal(null)}
-                className="px-4 py-2 rounded-[7px] text-[13px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">Cancel</button>
-              <button onClick={handleSaveValEdit} disabled={savingValEdit}
-                className="px-4 py-2 rounded-[7px] text-[13px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors disabled:opacity-60">
-                {savingValEdit ? 'Saving...' : 'Save Changes'}
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ══ DATA ROOM ══ */}
       {tab === 'dataroom' && (
