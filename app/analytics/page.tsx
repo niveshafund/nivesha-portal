@@ -48,7 +48,6 @@ export default function AnalyticsPage() {
   const [metric, setMetric] = useState<Metric>('moic');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [groupByCompany, setGroupByCompany] = useState<'none' | 'sector' | 'stage'>('none');
-  const [groupFilter, setGroupFilter] = useState<string>('all');
 
   useEffect(() => {
     (async () => {
@@ -137,16 +136,7 @@ export default function AnalyticsPage() {
 
   // ── PORTFOLIO COMPANIES TAB ────────────────────────────────────────────────
 
-  // Filter by group selection + specific value
-  const filteredRows = groupByCompany === 'none'
-    ? companyRows
-    : companyRows.filter(r => {
-        const val = groupByCompany === 'sector' ? r.company.sector : r.company.stage;
-        if (!val) return false;
-        return groupFilter === 'all' || val === groupFilter;
-      });
-
-  const sortedRows = [...filteredRows].sort((a, b) => {
+  const sortedRows = [...companyRows].sort((a, b) => {
     const av = metric === 'moic' ? a.moic : (a.irr ?? -999);
     const bv = metric === 'moic' ? b.moic : (b.irr ?? -999);
     return sortDir === 'desc' ? bv - av : av - bv;
@@ -155,15 +145,33 @@ export default function AnalyticsPage() {
   const topPerformer = [...companyRows].sort((a, b) => b.moic - a.moic)[0];
   const needsAttention = [...companyRows].filter(r => r.company.status !== 'Written Off').sort((a, b) => a.moic - b.moic)[0];
 
-  const activeRows = groupByCompany === 'none' ? companyRows : filteredRows;
-  const avgMoic = activeRows.length > 0 ? activeRows.reduce((s, r) => s + r.moic, 0) / activeRows.length : 0;
-  const irrRows = activeRows.filter(r => r.irr != null);
+  const avgMoic = companyRows.length > 0 ? companyRows.reduce((s, r) => s + r.moic, 0) / companyRows.length : 0;
+  const irrRows = companyRows.filter(r => r.irr != null);
   const avgIrr = irrRows.length > 0 ? irrRows.reduce((s, r) => s + r.irr!, 0) / irrRows.length : null;
-  const avgDpi = activeRows.length > 0 ? activeRows.reduce((s, r) => s + r.dpi, 0) / activeRows.length : 0;
+  const avgDpi = companyRows.length > 0 ? companyRows.reduce((s, r) => s + r.dpi, 0) / companyRows.length : 0;
+
+  // Aggregated group bars for when groupByCompany !== 'none'
+  type GroupBarRow = { name: string; value: number; companies: number; color: string; };
+  const groupBarRows: GroupBarRow[] = (() => {
+    if (groupByCompany === 'none') return [];
+    const map = new Map<string, CompanyRow[]>();
+    companyRows.forEach(r => {
+      const key = (groupByCompany === 'sector' ? r.company.sector : r.company.stage) || 'Unknown';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(r);
+    });
+    return Array.from(map.entries()).map(([name, rows], i) => ({
+      name,
+      value: metric === 'moic'
+        ? rows.reduce((s, r) => s + r.moic, 0) / rows.length
+        : rows.filter(r => r.irr != null).reduce((s, r) => s + r.irr!, 0) / (rows.filter(r => r.irr != null).length || 1),
+      companies: rows.length,
+      color: COLORS[i % COLORS.length],
+    })).sort((a, b) => sortDir === 'desc' ? b.value - a.value : a.value - b.value);
+  })();
 
   // Bar chart — top 20 by selected metric
   const barRows = sortedRows.slice(0, 20);
-  const maxBarVal = Math.max(...barRows.map(r => metric === 'moic' ? r.moic : Math.abs(r.irr ?? 0)));
 
   // Quartile coloring for bar chart
   const ranked = [...companyRows].sort((a, b) => {
@@ -353,20 +361,11 @@ export default function AnalyticsPage() {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[12.5px] text-[#6b6860]">Group by</span>
-              <select value={groupByCompany} onChange={e => { setGroupByCompany(e.target.value as any); setGroupFilter('all'); }} className={inputCls}>
+              <select value={groupByCompany} onChange={e => setGroupByCompany(e.target.value as any)} className={inputCls}>
                 <option value="none">None</option>
                 <option value="sector">Sector</option>
                 <option value="stage">Stage</option>
               </select>
-              {groupByCompany !== 'none' && (() => {
-                const opts = [...new Set(companyRows.map(r => (groupByCompany === 'sector' ? r.company.sector : r.company.stage) ?? '').filter(Boolean))].sort();
-                return (
-                  <select value={groupFilter} onChange={e => setGroupFilter(e.target.value)} className={inputCls}>
-                    <option value="all">All {groupByCompany === 'sector' ? 'sectors' : 'stages'}</option>
-                    {opts.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                );
-              })()}
             </div>
             <div className="flex items-center gap-2 ml-auto">
               <span className="text-[12.5px] text-[#6b6860]">Sort</span>
@@ -380,7 +379,7 @@ export default function AnalyticsPage() {
           {/* KPI tiles */}
           <div className="grid grid-cols-4 gap-3 mb-6">
             {[
-              { label: 'Companies',  value: activeRows.length.toString() },
+              { label: 'Companies',  value: companyRows.length.toString() },
               { label: 'Avg MOIC',   value: `${avgMoic.toFixed(2)}x` },
               { label: 'Avg DPI',    value: `${avgDpi.toFixed(2)}x` },
               { label: 'Avg IRR',    value: avgIrr != null ? `${avgIrr.toFixed(1)}%` : '—' },
@@ -394,39 +393,61 @@ export default function AnalyticsPage() {
 
           {/* Bar chart */}
           <div className="bg-white border border-[#e8e6df] rounded-xl p-5 mb-4">
-            <div className="flex items-start justify-between mb-1">
-              <div>
-                <div className="text-[13.5px] font-semibold">Company Rankings by {metric.toUpperCase()}</div>
-                <div className="text-[11.5px] text-[#9b9890]">Best to worst performers · Top {Math.min(20, barRows.length)} shown</div>
+            {groupByCompany === 'none' ? (<>
+              <div className="flex items-start justify-between mb-1">
+                <div>
+                  <div className="text-[13.5px] font-semibold">Company Rankings by {metric.toUpperCase()}</div>
+                  <div className="text-[11.5px] text-[#9b9890]">Best to worst performers · Top {Math.min(20, barRows.length)} shown</div>
+                </div>
+                <div className="flex items-center gap-3 text-[11px]">
+                  {[['#10b981','Top 25%'],['#2d5be3','25–50%'],['#f59e0b','50–75%'],['#ef4444','Bottom 25%']].map(([c,l]) => (
+                    <div key={l} className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full" style={{ background: c }} />
+                      <span className="text-[#6b6860]">{l}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="flex items-center gap-3 text-[11px]">
-                {[['#10b981','Top 25%'],['#2d5be3','25–50%'],['#f59e0b','50–75%'],['#ef4444','Bottom 25%']].map(([c,l]) => (
-                  <div key={l} className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full" style={{ background: c }} />
-                    <span className="text-[#6b6860]">{l}</span>
-                  </div>
-                ))}
+              <ResponsiveContainer width="100%" height={Math.max(200, barRows.length * 28)}>
+                <BarChart data={barRows.map((r, i) => ({
+                  name: r.company.name,
+                  value: metric === 'moic' ? r.moic : (r.irr ?? 0),
+                }))} layout="vertical" margin={{ left: 120, right: 40, top: 4, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0efe9" />
+                  <XAxis type="number" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false}
+                    tickFormatter={v => metric === 'moic' ? `${v.toFixed(1)}x` : `${v.toFixed(0)}%`} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#6b6860' }} axisLine={false} tickLine={false} width={120} />
+                  <Tooltip formatter={(v: any) => metric === 'moic' ? `${Number(v).toFixed(2)}x` : `${Number(v).toFixed(1)}%`} />
+                  <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                    {barRows.map((r, i) => {
+                      const globalIdx = ranked.findIndex(rr => rr.company.id === r.company.id);
+                      return <Cell key={i} fill={quartileColor(globalIdx)} />;
+                    })}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </>) : (<>
+              <div className="mb-4">
+                <div className="text-[13.5px] font-semibold">
+                  {groupByCompany === 'sector' ? 'Sector' : 'Stage'} Rankings by {metric.toUpperCase()}
+                </div>
+                <div className="text-[11.5px] text-[#9b9890]">
+                  Aggregate {metric.toUpperCase()} per {groupByCompany === 'sector' ? 'sector' : 'stage'}
+                </div>
               </div>
-            </div>
-            <ResponsiveContainer width="100%" height={Math.max(200, barRows.length * 28)}>
-              <BarChart data={barRows.map((r, i) => ({
-                name: r.company.name,
-                value: metric === 'moic' ? r.moic : (r.irr ?? 0),
-                idx: ranked.findIndex(rr => rr.company.id === r.company.id),
-              }))} layout="vertical" margin={{ left: 120, right: 40, top: 4, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0efe9" />
-                <XAxis type="number" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false}
-                  tickFormatter={v => metric === 'moic' ? `${v.toFixed(1)}x` : `${v.toFixed(0)}%`} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#6b6860' }} axisLine={false} tickLine={false} width={120} />
-                <Tooltip formatter={(v: any) => metric === 'moic' ? `${Number(v).toFixed(2)}x` : `${Number(v).toFixed(1)}%`} />
-                <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                  {barRows.map((r, i) => {
-                    const globalIdx = ranked.findIndex(rr => rr.company.id === r.company.id);
-                    return <Cell key={i} fill={quartileColor(globalIdx)} />;
-                  })}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+              <ResponsiveContainer width="100%" height={Math.max(200, groupBarRows.length * 52)}>
+                <BarChart data={groupBarRows} layout="vertical" margin={{ left: 160, right: 60, top: 4, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0efe9" />
+                  <XAxis type="number" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false}
+                    tickFormatter={v => metric === 'moic' ? `${v.toFixed(1)}x` : `${v.toFixed(0)}%`} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#6b6860' }} axisLine={false} tickLine={false} width={160} />
+                  <Tooltip formatter={(v: any) => metric === 'moic' ? `${Number(v).toFixed(2)}x` : `${Number(v).toFixed(1)}%`} />
+                  <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                    {groupBarRows.map((g, i) => <Cell key={i} fill={g.color} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </>)}
           </div>
 
           {/* Top / Bottom cards */}
