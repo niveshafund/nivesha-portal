@@ -19,7 +19,7 @@ const fmtFull = (n: number | null | undefined) => n == null ? '$0' : `$${n.toLoc
 const moicColor = (m: number) => m >= 3 ? 'text-green-600' : m >= 1.2 ? 'text-amber-600' : m > 0 && m < 1 ? 'text-red-600' : 'text-[#9b9890]';
 const irrColor  = (i: number) => i > 0 ? 'text-green-600' : i < 0 ? 'text-red-600' : 'text-[#9b9890]';
 
-const SECTORS = ['AI / ML','Healthcare Tech','Fintech','B2B SaaS','SpaceTech','CleanTech','EdTech','Consumer Tech','DeepTech','Cybersecurity','Logistics','PropTech','AgTech','Robotics','Blockchain','GovTech','InsurTech','HRTech','Other'];
+const SECTORS = ['AI / ML','AI Infrastructure','Physical AI','Healthcare Tech','Fintech','B2B SaaS','Enterprise AI','SpaceTech','CleanTech','ClimateTech','EdTech','Consumer Tech','DeepTech','Cybersecurity','Logistics','IndustrialTech','PropTech','AgTech','Robotics','Blockchain','GovTech','InsurTech','HRTech','Hospitality','Other'];
 const STAGES  = ['Series Pre-seed','Series Seed','Series A','Series B','Series C','Series D','Series E','Growth Stage','Other'];
 const QUARTERS = ['Q1 2024','Q2 2024','Q3 2024','Q4 2024','Q1 2025','Q2 2025','Q3 2025','Q4 2025','Q1 2026','Q2 2026','Q3 2026','Q4 2026'];
 const QUARTER_END: Record<string,string> = {
