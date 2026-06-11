@@ -9,7 +9,7 @@ const mainNav = [
   { href: '/dashboard',       label: 'Dashboard',          icon: 'grid' },
   { href: '/funds',           label: 'Funds',              icon: 'briefcase' },
   { href: '/analytics',       label: 'Analytics',          icon: 'globe' },
-  { href: '/reports',         label: 'Reports',            icon: 'file-text',  disabled: true },
+  { href: '/reports',         label: 'Reports',            icon: 'file-text' },
 ];
 
 const adminNav = [
