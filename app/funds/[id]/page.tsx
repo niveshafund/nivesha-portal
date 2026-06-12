@@ -513,8 +513,8 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const totalCalled    = lps.reduce((s, lp) => s + lp.called, 0)    || fund.called;
   const totalInvested  = txns.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
   const totalExpenses  = expenses.reduce((s, e) => s + e.amount, 0);
-  const adminFeeTotal  = totalCommitted * ((fund.management_fee || 0) / 100);
-  const availCash      = totalCalled - totalInvested;
+  const adminFeeTotal  = totalCommitted * ((fund.management_fee || 0) / 100) * (fund.fund_life || 10);
+  const availCash      = totalCalled - totalInvested - totalExpenses;
   const outstandingCap = totalCommitted - totalCalled;
 
   const tabs: { key: Tab; label: string }[] = [
@@ -568,8 +568,8 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
             {[
               { label: 'Committed Capital',   value: fmtFull(totalCommitted), sub: 'Total LP commitments',         color: '' },
               { label: 'Invested Capital',    value: fmtFull(totalInvested),  sub: 'Deployed into companies',      color: '' },
-              { label: 'Available Cash',      value: fmtFull(availCash),      sub: 'Called but not yet invested',  color: availCash >= 0 ? 'text-green-600' : 'text-red-600' },
-              { label: 'Admin Fee (Total)',   value: fmtFull(adminFeeTotal),  sub: `${fund.management_fee || 0}% of committed capital`, color: 'text-amber-600' },
+              { label: 'Available Cash',      value: fmtFull(availCash),      sub: 'Called − Invested − Fees Paid', color: availCash >= 0 ? 'text-green-600' : 'text-red-600' },
+              { label: 'Admin Fee (Total)',   value: fmtFull(adminFeeTotal),  sub: `${fund.management_fee || 0}% × ${fund.fund_life || 10}yr of committed`, color: 'text-amber-600' },
               { label: 'Outstanding Capital', value: fmtFull(outstandingCap), sub: 'Committed but not yet called', color: 'text-[#6b6860]' },
             ].map(k => (
               <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
@@ -606,7 +606,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
               <div><span className="text-[#6b6860]">Outstanding: </span><span className="font-mono font-medium text-[#6b6860]">{fmtFull(outstandingCap)}</span></div>
             </div>
             <div className="grid grid-cols-2 gap-4 text-[12px] mt-3 pt-3 border-t border-[#f0f0ed]">
-              <div><span className="text-[#6b6860]">Admin Fee (10yr total, {fund.management_fee || 0}% of committed): </span><span className="font-mono font-medium text-amber-600">{fmtFull(adminFeeTotal)}</span></div>
+              <div><span className="text-[#6b6860]">Admin Fee ({fund.fund_life || 10}yr total, {fund.management_fee || 0}%/yr of committed): </span><span className="font-mono font-medium text-amber-600">{fmtFull(adminFeeTotal)}</span></div>
               <div><span className="text-[#6b6860]">Admin Fee Disbursed to Date: </span><span className="font-mono font-medium text-amber-600">{fmtFull(totalExpenses)}</span></div>
             </div>
           </div>
