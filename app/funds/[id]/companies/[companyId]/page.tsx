@@ -1428,7 +1428,7 @@ function CompanyDetailInner({ params }: { params: Promise<{ id: string; companyI
       {editingVal && (() => {
         // Parse stored notes: "[Method] user notes" → separate method + clean notes
         const storedNotes = editingVal.notes ?? '';
-        const methodMatch = storedNotes.match(/^\[(.+?)\](.*)/s);
+        const methodMatch = storedNotes.match(/^\[(.+?)\]([\s\S]*)/);
         const parsedMethod = methodMatch ? methodMatch[1] : 'Recent Funding Round';
         const parsedNotes  = methodMatch ? methodMatch[2].trim() : storedNotes;
 
