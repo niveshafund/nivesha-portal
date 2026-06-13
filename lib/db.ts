@@ -24,6 +24,7 @@ export type DbFund = {
   focus: string[];
   description?: string;
   start_date?: string;
+  exit_proceeds_received?: number;
   created_at: string;
   updated_at: string;
 };
