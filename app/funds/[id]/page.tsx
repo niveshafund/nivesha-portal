@@ -557,7 +557,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const availCash      = totalCalled - adminFeeTotal - totalInvested + totalDistributions + exitProceeds;
   const realizedGainLoss   = realizedProceeds - realizedCost;          // negative = net loss on exited/written-off positions
   const unrealizedGainLoss = unrealizedCurrentVal - unrealizedCost;    // mark-to-market gain/loss on active positions
-  const netUnrealizedGainLoss = unrealizedGainLoss - realizedGainLoss;
+  const netUnrealizedGainLoss = unrealizedGainLoss + realizedGainLoss;
   const outstandingCap = totalCommitted - totalCalled;
 
   const tabs: { key: Tab; label: string }[] = [
@@ -638,7 +638,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
             {[
               { label: 'Realized Gain/Loss',       value: fmtFull(realizedGainLoss),       sub: 'Distributions − cost basis of Exited/Written Off positions', cls: realizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
               { label: 'Unrealized Gain/Loss',     value: fmtFull(unrealizedGainLoss),     sub: 'Current value − cost basis of Active positions',              cls: unrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
-              { label: 'Net Unrealized Gain/Loss', value: fmtFull(netUnrealizedGainLoss),  sub: 'Unrealized − Realized',                                  cls: netUnrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
+              { label: 'Net Unrealized Gain/Loss', value: fmtFull(netUnrealizedGainLoss),  sub: 'Unrealized + Realized',                                  cls: netUnrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
             ].map(k => (
               <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
                 <label className="text-[11px] text-[#6b6860] block mb-1.5">{k.label}</label>
@@ -671,7 +671,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
             <div className="grid grid-cols-2 gap-x-12 gap-y-4">
               {[
                 { label: 'Fund Name',        value: fund.name },
-                { label: 'Commitment Amount', value: fmtFull(fund.committed) },
+                { label: 'Commitment Amount', value: fmtFull(totalCommitted) },
                 { label: 'Vintage Year',      value: String(fund.vintage) },
                 { label: 'Currency',          value: fund.currency || 'USD' },
                 { label: 'Status',            value: fund.status },
