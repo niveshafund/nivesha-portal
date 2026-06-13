@@ -515,24 +515,31 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const totalExpenses  = expenses.reduce((s, e) => s + e.amount, 0);
   const adminFeeTotal  = totalCalled * ((fund.management_fee || 0) / 100) * (fund.fund_life || 10);
   const totalDistributions = lps.reduce((s, lp) => s + (lp.distributions || 0), 0);
-  const exitProceeds   = fund.exit_proceeds_received || 0;
-  const availCash      = totalCalled - adminFeeTotal - totalInvested + totalDistributions + exitProceeds;
-  const outstandingCap = totalCommitted - totalCalled;
-
-  // ── Realized / Unrealized Gain-Loss (mirrors Portfolio tab valuation logic) ──
+  // ── Realized / Unrealized Gain-Loss (fully derived from company status + distributions) ──
   const companyMapTop = Object.fromEntries(companies.map(c => [c.id, c]));
   const latestValByTxnTop = valuations.reduce<Record<string, DbValuation>>((acc, v) => {
     if ((v as any).transaction_id && !acc[(v as any).transaction_id]) acc[(v as any).transaction_id] = v;
     return acc;
   }, {});
   const latestValByCompanyTop = valuations.reduce<Record<string, DbValuation>>((acc, v) => { if (v.company_id && !acc[v.company_id]) acc[v.company_id] = v; return acc; }, {});
+  const distribByCompanyTop = txns.filter(t => t.type === 'Distribution' && t.company_id).reduce<Record<string, number>>((acc, t) => { acc[t.company_id!] = (acc[t.company_id!] || 0) + t.amount; return acc; }, {});
 
-  let writtenOffCost = 0;     // cost basis of positions valued at $0 (write-offs / exits)
-  let unrealizedCost = 0;     // cost basis of still-active positions
-  let unrealizedCurrentVal = 0; // current value of still-active positions
+  let unrealizedCost = 0;       // cost basis of active (not exited/written-off) positions
+  let unrealizedCurrentVal = 0; // current value of active positions
+  let realizedCost = 0;         // cost basis of exited/written-off positions
+  let realizedProceeds = 0;     // distributions received from exited/written-off positions
 
   txns.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
     const co = companyMapTop[t.company_id!];
+    const isRealized = co?.status === 'Exited' || co?.status === 'Written Off';
+    const distribAmt = distribByCompanyTop[t.company_id!] ?? 0;
+
+    if (isRealized) {
+      realizedCost += t.amount;
+      realizedProceeds += distribAmt;
+      return;
+    }
+
     const entryVal = t.valuation_cap ?? null;
     const latestVal = latestValByTxnTop[t.id] ?? (t.company_id ? latestValByCompanyTop[t.company_id] : null);
     const hasRealValuation = latestVal != null && latestVal.value != null;
@@ -542,18 +549,16 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
       if (entryVal && entryVal > 0 && currentCoVal > 0) return (t.amount / entryVal) * currentCoVal;
       return t.amount;
     })();
-
-    if (hasRealValuation && currentInvValue === 0) {
-      writtenOffCost += t.amount;
-    } else {
-      unrealizedCost += t.amount;
-      unrealizedCurrentVal += currentInvValue;
-    }
+    unrealizedCost += t.amount;
+    unrealizedCurrentVal += currentInvValue;
   });
 
-  const realizedGainLoss   = exitProceeds - writtenOffCost;          // negative = net loss on exited/written-off positions
-  const unrealizedGainLoss = unrealizedCurrentVal - unrealizedCost;  // mark-to-market gain/loss on active positions
+  const exitProceeds   = realizedProceeds;
+  const availCash      = totalCalled - adminFeeTotal - totalInvested + totalDistributions + exitProceeds;
+  const realizedGainLoss   = realizedProceeds - realizedCost;          // negative = net loss on exited/written-off positions
+  const unrealizedGainLoss = unrealizedCurrentVal - unrealizedCost;    // mark-to-market gain/loss on active positions
   const netUnrealizedGainLoss = unrealizedGainLoss - realizedGainLoss;
+  const outstandingCap = totalCommitted - totalCalled;
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview',  label: 'Overview' },
@@ -631,8 +636,8 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
           </div>
           <div className="grid grid-cols-3 gap-3 mb-5">
             {[
-              { label: 'Realized Gain/Loss',       value: fmtFull(realizedGainLoss),       sub: 'Cash received − cost of exited/written-off positions', cls: realizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
-              { label: 'Unrealized Gain/Loss',     value: fmtFull(unrealizedGainLoss),     sub: 'Current value − cost of active positions',              cls: unrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
+              { label: 'Realized Gain/Loss',       value: fmtFull(realizedGainLoss),       sub: 'Distributions − cost basis of Exited/Written Off positions', cls: realizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
+              { label: 'Unrealized Gain/Loss',     value: fmtFull(unrealizedGainLoss),     sub: 'Current value − cost basis of Active positions',              cls: unrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
               { label: 'Net Unrealized Gain/Loss', value: fmtFull(netUnrealizedGainLoss),  sub: 'Unrealized − Realized',                                  cls: netUnrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
             ].map(k => (
               <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
