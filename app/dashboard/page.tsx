@@ -113,19 +113,25 @@ export default function DashboardPage() {
       if (vDate > exDate) latestValByTxn[txnId] = v;
     });
     // Portfolio value: sum current value across EVERY investment round (txn-level valuation,
-    // falling back to company-level valuation with ownership proration, then cost basis)
+    // falling back to company-level valuation, then cost basis)
+    const investCountByCo: Record<string, number> = {};
+    txns.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+      investCountByCo[t.company_id!] = (investCountByCo[t.company_id!] ?? 0) + 1;
+    });
     const portfolioValue = txns.filter(t => t.type === 'Investment').reduce((sum, t) => {
       const txnVal = latestValByTxn[t.id];
       if (txnVal != null && txnVal.value != null) return sum + txnVal.value;
       const co = companies.find(c => c.id === t.company_id);
       const coVal = t.company_id ? latestByCompany[t.company_id] : null;
       if (coVal != null && coVal.value != null) {
+        // Single-investment company: company-level valuation's `value` is the position value directly.
+        if (t.company_id && investCountByCo[t.company_id] === 1) return sum + coVal.value;
         const entryVal = t.valuation_cap ?? null;
         if (entryVal && entryVal > 0) {
           const companyValue = (coVal as any)?.company_value ?? co?.valuation ?? 0;
           if (companyValue > 0) return sum + (t.amount / entryVal) * companyValue;
         }
-        return sum;
+        return sum + t.amount;
       }
       return sum + t.amount;
     }, 0);
@@ -287,12 +293,16 @@ export default function DashboardPage() {
         if (txnVal != null && txnVal.value != null) return sum + txnVal.value;
         const coVal = latestValByCo[co.id];
         if (coVal != null && coVal.value != null) {
+          // Single-investment company: the company-level valuation's `value`
+          // already represents this position's current value directly.
+          if (investTxns.length === 1) return sum + coVal.value;
+          // Multi-round company sharing one company-level valuation: prorate by ownership.
           const entryVal = t.valuation_cap ?? null;
           if (entryVal && entryVal > 0) {
             const companyValue = (coVal as any)?.company_value ?? co.valuation ?? 0;
             if (companyValue > 0) return sum + (t.amount / entryVal) * companyValue;
           }
-          return sum; // no usable basis, contribute 0 (avoid double-counting cost)
+          return sum + t.amount; // no usable basis: cost basis
         }
         return sum + t.amount; // no valuation at all: cost basis (1.00x)
       }, 0);
