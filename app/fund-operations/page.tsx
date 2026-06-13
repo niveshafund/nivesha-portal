@@ -127,11 +127,13 @@ export default function FundOperationsPage() {
         { data: txns },
         { data: vals },
         { data: expenses },
+        { data: coData },
       ] = await Promise.all([
         supabase.from('lp_transactions').select('*').eq('fund_id', fundId).lte('date', asOf),
         supabase.from('transactions').select('*').eq('fund_id', fundId).lte('date', asOf),
         supabase.from('valuations').select('*').eq('fund_id', fundId).lte('quarter_end', asOf),
         supabase.from('expenses').select('*').eq('fund_id', fundId).lte('date', asOf),
+        supabase.from('companies').select('id, status').eq('fund_id', fundId),
       ]);
 
       const balances: Record<string, { debit: number; credit: number }> = {};
@@ -152,39 +154,47 @@ export default function FundOperationsPage() {
       });
 
       // Fund Transactions → Investments / Exits / Write-offs
-      // Build company investment lookup for realized gain/loss calc
+      const coStatusMap: Record<string, string> = {};
+      (coData ?? []).forEach((c: any) => { coStatusMap[c.id] = c.status; });
+
       const investedByCo: Record<string, number> = {};
-      const companiesData: Record<string, any> = {};
-      // First pass: sum total invested per company
       (txns ?? []).forEach((t: any) => {
-        if (t.type === 'Investment' && t.company_id) {
+        if (t.type === 'Investment' && t.company_id)
           investedByCo[t.company_id] = (investedByCo[t.company_id] ?? 0) + t.amount;
-        }
-        if (t.company_id && t.company_name) companiesData[t.company_id] = t.company_name;
       });
 
-      // Second pass: book entries
+      // Book investment and exit entries
+      const coIdsWithDistrib = new Set<string>();
       (txns ?? []).forEach((t: any) => {
         if (t.type === 'Investment') {
           balances['1200'].debit  += t.amount; // Investments at Cost DR
           balances['1100'].credit += t.amount; // Cash CR
         }
         if (t.type === 'Distribution') {
-          // Cash received back from a portfolio company exit
-          balances['1100'].debit  += t.amount; // Cash DR (proceeds received)
-          // Remove original cost basis of the position from investments at cost
+          coIdsWithDistrib.add(t.company_id);
+          balances['1100'].debit  += t.amount; // Cash DR (exit proceeds)
           const costBasis = investedByCo[t.company_id] ?? t.amount;
-          balances['1200'].credit += costBasis; // Investments at Cost CR
-          // Realized gain/loss = proceeds − cost basis
+          balances['1200'].credit += costBasis; // Investments at Cost CR (full cost basis)
           const gain = t.amount - costBasis;
           if (gain > 0) balances['4300'].credit += gain;
-          else if (gain < 0) balances['4300'].debit  += Math.abs(gain);
+          else if (gain < 0) balances['4300'].debit += Math.abs(gain);
+        }
+      });
+
+      // Write-offs: companies with status 'Written Off' and no Distribution transaction
+      // have no cash recovery — book full cost basis as realized loss
+      Object.entries(coStatusMap).forEach(([coId, status]) => {
+        if (status === 'Written Off' && !coIdsWithDistrib.has(coId)) {
+          const costBasis = investedByCo[coId] ?? 0;
+          if (costBasis > 0) {
+            balances['1200'].credit += costBasis; // Remove from Investments at Cost
+            balances['4300'].debit  += costBasis; // Realized Loss DR
+          }
         }
       });
 
       // Valuations → Unrealized Gains/Losses
-      // Use per-transaction valuation (same logic as Portfolio tab) so multi-round
-      // companies like Wink/Phonely are handled correctly.
+      // Skip Exited and Written Off companies — their gain/loss is already realized above
       const latestValByTxn: Record<string, any> = {};
       (vals ?? []).forEach((v: any) => {
         if (!v.transaction_id) return;
@@ -197,14 +207,16 @@ export default function FundOperationsPage() {
         const ex = latestValByCo[v.company_id];
         if (!ex || v.quarter_end > ex.quarter_end) latestValByCo[v.company_id] = v;
       });
-      // Count investments per company to know when to use direct value vs proration
       const investCountByCo: Record<string, number> = {};
       (txns ?? []).filter((t: any) => t.type === 'Investment' && t.company_id)
         .forEach((t: any) => { investCountByCo[t.company_id] = (investCountByCo[t.company_id] ?? 0) + 1; });
 
       let totalUnrealized = 0;
       (txns ?? []).filter((t: any) => t.type === 'Investment' && t.company_id).forEach((t: any) => {
-        // Skip exited/written-off positions — their gain/loss is realized, not unrealized
+        // Skip exited/written-off — already booked as realized
+        const coStatus = coStatusMap[t.company_id];
+        if (coStatus === 'Exited' || coStatus === 'Written Off') return;
+
         const txnVal = latestValByTxn[t.id];
         const coVal  = latestValByCo[t.company_id];
         let currentVal: number;
@@ -219,11 +231,11 @@ export default function FundOperationsPage() {
               const companyValue = coVal.company_value ?? 0;
               currentVal = companyValue > 0 ? (t.amount / entryVal) * companyValue : t.amount;
             } else {
-              currentVal = t.amount; // cost basis
+              currentVal = t.amount;
             }
           }
         } else {
-          currentVal = t.amount; // no valuation: cost basis (no unrealized)
+          currentVal = t.amount; // no valuation: cost basis = no unrealized
         }
         totalUnrealized += currentVal - t.amount;
       });
