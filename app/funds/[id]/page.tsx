@@ -515,7 +515,8 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const totalExpenses  = expenses.reduce((s, e) => s + e.amount, 0);
   const adminFeeTotal  = totalCalled * ((fund.management_fee || 0) / 100) * (fund.fund_life || 10);
   const totalDistributions = lps.reduce((s, lp) => s + (lp.distributions || 0), 0);
-  const availCash      = totalCalled - adminFeeTotal - totalInvested + totalDistributions;
+  const exitProceeds   = fund.exit_proceeds_received || 0;
+  const availCash      = totalCalled - adminFeeTotal - totalInvested + totalDistributions + exitProceeds;
   const outstandingCap = totalCommitted - totalCalled;
 
   const tabs: { key: Tab; label: string }[] = [
