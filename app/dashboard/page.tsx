@@ -10,6 +10,7 @@ import {
 
 // ── Formatters ────────────────────────────────────────────────
 const fmt  = (n: number) => n >= 1_000_000 ? `$${(n/1_000_000).toFixed(1)}m` : n >= 1_000 ? `$${(n/1_000).toFixed(0)}k` : `$${n.toLocaleString()}`;
+const fmtFull = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 const fmtM = (n: number) => `$${(n/1_000_000).toFixed(1)}m`;
 const pct  = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 
@@ -216,17 +217,53 @@ export default function DashboardPage() {
 
   // ── Portfolio Quick View ─────────────────────────────────────
   const portfolioRows = useMemo(() => {
+    // latest valuation per transaction (each investment round can have its own valuation)
+    const latestValByTxn: Record<string, DbValuation> = {};
+    valuations.forEach(v => {
+      const txnId = (v as any).transaction_id;
+      if (!txnId) return;
+      const existing = latestValByTxn[txnId];
+      if (!existing) { latestValByTxn[txnId] = v; return; }
+      const vDate  = v.quarter_end || v.created_at || '';
+      const exDate = existing.quarter_end || existing.created_at || '';
+      if (vDate > exDate) latestValByTxn[txnId] = v;
+    });
+    // latest company-level valuation (fallback for rounds without a transaction-level valuation)
+    const latestValByCo: Record<string, DbValuation> = {};
+    valuations.forEach(v => {
+      if (!v.company_id) return;
+      const existing = latestValByCo[v.company_id];
+      if (!existing) { latestValByCo[v.company_id] = v; return; }
+      const vDate  = v.quarter_end || v.created_at || '';
+      const exDate = existing.quarter_end || existing.created_at || '';
+      if (vDate > exDate) latestValByCo[v.company_id] = v;
+    });
+
     return companies.map(co => {
       const coTxns  = txns.filter(t => t.company_id === co.id);
-      const invested = coTxns.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
+      const investTxns = coTxns.filter(t => t.type === 'Investment');
+      const invested = investTxns.reduce((s, t) => s + t.amount, 0);
       const distrib  = coTxns.filter(t => t.type === 'Distribution').reduce((s, t) => s + t.amount, 0);
-      const latestVal = valuations
-        .filter(v => v.company_id === co.id)
-        .sort((a, b) => b.quarter_end.localeCompare(a.quarter_end))[0];
-      const currentVal = latestVal?.value ?? invested;
+
+      // Sum current value across every investment round for this company
+      const currentVal = investTxns.reduce((sum, t) => {
+        const txnVal = latestValByTxn[t.id];
+        if (txnVal != null && txnVal.value != null) return sum + txnVal.value;
+        const coVal = latestValByCo[co.id];
+        if (coVal != null && coVal.value != null) {
+          const entryVal = t.valuation_cap ?? null;
+          if (entryVal && entryVal > 0) {
+            const companyValue = (coVal as any)?.company_value ?? co.valuation ?? 0;
+            if (companyValue > 0) return sum + (t.amount / entryVal) * companyValue;
+          }
+          return sum; // no usable basis, contribute 0 (avoid double-counting cost)
+        }
+        return sum + t.amount; // no valuation at all: cost basis (1.00x)
+      }, 0);
+
       const moic = invested > 0 ? (currentVal + distrib) / invested : 0;
       const dpi  = invested > 0 ? distrib / invested : 0;
-      const sortedInv = coTxns.filter(t => t.type === 'Investment').sort((a, b) => a.date.localeCompare(b.date));
+      const sortedInv = [...investTxns].sort((a, b) => a.date.localeCompare(b.date));
       const firstDate = sortedInv[0]?.date ? new Date(sortedInv[0].date) : null;
       const years = firstDate ? (Date.now() - firstDate.getTime()) / (1000*60*60*24*365.25) : 0;
       const irr = years > 0.1 && currentVal > 0 && invested > 0
@@ -427,9 +464,9 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmt(invested)}</td>
-                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmt(distrib)}</td>
-                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] font-medium">{fmt(currentVal)}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtFull(invested)}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px]">{fmtFull(distrib)}</td>
+                  <td className="px-4 py-2.5 border-b border-[#e8e6df] font-mono text-[12px] font-medium">{fmtFull(currentVal)}</td>
                   <td className="px-4 py-2.5 border-b border-[#e8e6df]">
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold text-white"
                       style={{ background: moicColor(moic) }}>
