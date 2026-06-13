@@ -519,6 +519,42 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const availCash      = totalCalled - adminFeeTotal - totalInvested + totalDistributions + exitProceeds;
   const outstandingCap = totalCommitted - totalCalled;
 
+  // ── Realized / Unrealized Gain-Loss (mirrors Portfolio tab valuation logic) ──
+  const companyMapTop = Object.fromEntries(companies.map(c => [c.id, c]));
+  const latestValByTxnTop = valuations.reduce<Record<string, DbValuation>>((acc, v) => {
+    if ((v as any).transaction_id && !acc[(v as any).transaction_id]) acc[(v as any).transaction_id] = v;
+    return acc;
+  }, {});
+  const latestValByCompanyTop = valuations.reduce<Record<string, DbValuation>>((acc, v) => { if (v.company_id && !acc[v.company_id]) acc[v.company_id] = v; return acc; }, {});
+
+  let writtenOffCost = 0;     // cost basis of positions valued at $0 (write-offs / exits)
+  let unrealizedCost = 0;     // cost basis of still-active positions
+  let unrealizedCurrentVal = 0; // current value of still-active positions
+
+  txns.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+    const co = companyMapTop[t.company_id!];
+    const entryVal = t.valuation_cap ?? null;
+    const latestVal = latestValByTxnTop[t.id] ?? (t.company_id ? latestValByCompanyTop[t.company_id] : null);
+    const hasRealValuation = latestVal != null && latestVal.value != null;
+    const currentCoVal = hasRealValuation ? ((latestVal as any)?.company_value ?? co?.valuation ?? 0) : 0;
+    const currentInvValue = (() => {
+      if (hasRealValuation) return latestVal!.value;
+      if (entryVal && entryVal > 0 && currentCoVal > 0) return (t.amount / entryVal) * currentCoVal;
+      return t.amount;
+    })();
+
+    if (hasRealValuation && currentInvValue === 0) {
+      writtenOffCost += t.amount;
+    } else {
+      unrealizedCost += t.amount;
+      unrealizedCurrentVal += currentInvValue;
+    }
+  });
+
+  const realizedGainLoss   = exitProceeds - writtenOffCost;          // negative = net loss on exited/written-off positions
+  const unrealizedGainLoss = unrealizedCurrentVal - unrealizedCost;  // mark-to-market gain/loss on active positions
+  const netUnrealizedGainLoss = unrealizedGainLoss - realizedGainLoss;
+
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview',  label: 'Overview' },
     { key: 'portfolio', label: 'Portfolio' },
@@ -590,6 +626,19 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
               <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
                 <label className="text-[11px] text-[#6b6860] block mb-1.5">{k.label}</label>
                 <div className={`text-[24px] font-semibold font-mono ${k.cls}`}>{k.value}</div>
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-3 gap-3 mb-5">
+            {[
+              { label: 'Realized Gain/Loss',       value: fmtFull(realizedGainLoss),       sub: 'Cash received − cost of exited/written-off positions', cls: realizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
+              { label: 'Unrealized Gain/Loss',     value: fmtFull(unrealizedGainLoss),     sub: 'Current value − cost of active positions',              cls: unrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
+              { label: 'Net Unrealized Gain/Loss', value: fmtFull(netUnrealizedGainLoss),  sub: 'Unrealized − Realized',                                  cls: netUnrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
+            ].map(k => (
+              <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
+                <label className="text-[11px] text-[#6b6860] block mb-1.5">{k.label}</label>
+                <div className={`text-[18px] font-semibold font-mono mb-1 ${k.cls}`}>{k.value}</div>
+                <div className="text-[10.5px] text-[#9b9890]">{k.sub}</div>
               </div>
             ))}
           </div>
