@@ -151,37 +151,83 @@ export default function FundOperationsPage() {
         }
       });
 
-      // Fund Transactions → Investments
+      // Fund Transactions → Investments / Exits / Write-offs
+      // Build company investment lookup for realized gain/loss calc
+      const investedByCo: Record<string, number> = {};
+      const companiesData: Record<string, any> = {};
+      // First pass: sum total invested per company
+      (txns ?? []).forEach((t: any) => {
+        if (t.type === 'Investment' && t.company_id) {
+          investedByCo[t.company_id] = (investedByCo[t.company_id] ?? 0) + t.amount;
+        }
+        if (t.company_id && t.company_name) companiesData[t.company_id] = t.company_name;
+      });
+
+      // Second pass: book entries
       (txns ?? []).forEach((t: any) => {
         if (t.type === 'Investment') {
           balances['1200'].debit  += t.amount; // Investments at Cost DR
           balances['1100'].credit += t.amount; // Cash CR
         }
-        if (t.type === 'Distribution' || t.type === 'Exit') {
-          balances['1100'].debit  += t.amount; // Cash DR
-          balances['1200'].credit += t.amount; // Investments at Cost CR
-          const gain = t.amount - (t.amount); // simplified
+        if (t.type === 'Distribution') {
+          // Cash received back from a portfolio company exit
+          balances['1100'].debit  += t.amount; // Cash DR (proceeds received)
+          // Remove original cost basis of the position from investments at cost
+          const costBasis = investedByCo[t.company_id] ?? t.amount;
+          balances['1200'].credit += costBasis; // Investments at Cost CR
+          // Realized gain/loss = proceeds − cost basis
+          const gain = t.amount - costBasis;
           if (gain > 0) balances['4300'].credit += gain;
-          else if (gain < 0) balances['4300'].debit += Math.abs(gain);
+          else if (gain < 0) balances['4300'].debit  += Math.abs(gain);
         }
       });
 
       // Valuations → Unrealized Gains/Losses
-      // Get latest valuation per company
-      const latestVals: Record<string, any> = {};
+      // Use per-transaction valuation (same logic as Portfolio tab) so multi-round
+      // companies like Wink/Phonely are handled correctly.
+      const latestValByTxn: Record<string, any> = {};
       (vals ?? []).forEach((v: any) => {
-        if (!latestVals[v.company_id] || v.quarter_end > latestVals[v.company_id].quarter_end) {
-          latestVals[v.company_id] = v;
-        }
+        if (!v.transaction_id) return;
+        const ex = latestValByTxn[v.transaction_id];
+        if (!ex || v.quarter_end > ex.quarter_end) latestValByTxn[v.transaction_id] = v;
       });
+      const latestValByCo: Record<string, any> = {};
+      (vals ?? []).forEach((v: any) => {
+        if (!v.company_id) return;
+        const ex = latestValByCo[v.company_id];
+        if (!ex || v.quarter_end > ex.quarter_end) latestValByCo[v.company_id] = v;
+      });
+      // Count investments per company to know when to use direct value vs proration
+      const investCountByCo: Record<string, number> = {};
+      (txns ?? []).filter((t: any) => t.type === 'Investment' && t.company_id)
+        .forEach((t: any) => { investCountByCo[t.company_id] = (investCountByCo[t.company_id] ?? 0) + 1; });
+
       let totalUnrealized = 0;
-      Object.values(latestVals).forEach((v: any) => {
-        const costForCompany = (txns ?? [])
-          .filter((t: any) => t.company_id === v.company_id && t.type === 'Investment')
-          .reduce((sum: number, t: any) => sum + t.amount, 0);
-        const unrealized = v.value - costForCompany;
-        totalUnrealized += unrealized;
+      (txns ?? []).filter((t: any) => t.type === 'Investment' && t.company_id).forEach((t: any) => {
+        // Skip exited/written-off positions — their gain/loss is realized, not unrealized
+        const txnVal = latestValByTxn[t.id];
+        const coVal  = latestValByCo[t.company_id];
+        let currentVal: number;
+        if (txnVal != null && txnVal.value != null) {
+          currentVal = txnVal.value;
+        } else if (coVal != null && coVal.value != null) {
+          if (investCountByCo[t.company_id] === 1) {
+            currentVal = coVal.value;
+          } else {
+            const entryVal = t.valuation_cap ?? null;
+            if (entryVal && entryVal > 0) {
+              const companyValue = coVal.company_value ?? 0;
+              currentVal = companyValue > 0 ? (t.amount / entryVal) * companyValue : t.amount;
+            } else {
+              currentVal = t.amount; // cost basis
+            }
+          }
+        } else {
+          currentVal = t.amount; // no valuation: cost basis (no unrealized)
+        }
+        totalUnrealized += currentVal - t.amount;
       });
+
       if (totalUnrealized > 0) {
         balances['1220'].debit  += totalUnrealized;
         balances['4400'].credit += totalUnrealized;
