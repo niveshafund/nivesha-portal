@@ -101,27 +101,63 @@ export default function DashboardPage() {
       if (vDate > exDate) acc[v.company_id] = v;
       return acc;
     }, {});
-    // For KPI portfolioValue: use latest valuation if available, else cost (invested amount)
-    const investedByCompany = txns.filter(t => t.type === 'Investment').reduce<Record<string, number>>((acc, t) => {
-      if (!t.company_id) return acc;
-      acc[t.company_id] = (acc[t.company_id] ?? 0) + t.amount;
-      return acc;
-    }, {});
-    const portfolioValue = companies.reduce((s, co) => {
-      const latest = latestByCompany[co.id];
-      return s + (latest ? latest.value : (investedByCompany[co.id] ?? 0));
+    // Latest valuation per transaction (each investment round can have its own valuation)
+    const latestValByTxn: Record<string, DbValuation> = {};
+    valuations.forEach(v => {
+      const txnId = (v as any).transaction_id;
+      if (!txnId) return;
+      const existing = latestValByTxn[txnId];
+      if (!existing) { latestValByTxn[txnId] = v; return; }
+      const vDate  = v.quarter_end || v.created_at || '';
+      const exDate = existing.quarter_end || existing.created_at || '';
+      if (vDate > exDate) latestValByTxn[txnId] = v;
+    });
+    // Portfolio value: sum current value across EVERY investment round (txn-level valuation,
+    // falling back to company-level valuation with ownership proration, then cost basis)
+    const portfolioValue = txns.filter(t => t.type === 'Investment').reduce((sum, t) => {
+      const txnVal = latestValByTxn[t.id];
+      if (txnVal != null && txnVal.value != null) return sum + txnVal.value;
+      const co = companies.find(c => c.id === t.company_id);
+      const coVal = t.company_id ? latestByCompany[t.company_id] : null;
+      if (coVal != null && coVal.value != null) {
+        const entryVal = t.valuation_cap ?? null;
+        if (entryVal && entryVal > 0) {
+          const companyValue = (coVal as any)?.company_value ?? co?.valuation ?? 0;
+          if (companyValue > 0) return sum + (t.amount / entryVal) * companyValue;
+        }
+        return sum;
+      }
+      return sum + t.amount;
     }, 0);
 
     const totalValue = portfolioValue + distributions;
     const moic = invested > 0 ? totalValue / invested : 0;
     const dpi  = invested > 0 ? distributions / invested : 0;
 
-    // IRR (CAGR from earliest investment to today)
-    const sortedInv = txns.filter(t => t.type === 'Investment').sort((a, b) => a.date.localeCompare(b.date));
-    const firstDate = sortedInv[0]?.date ? new Date(sortedInv[0].date) : null;
-    const years = firstDate ? (Date.now() - firstDate.getTime()) / (1000*60*60*24*365.25) : 0;
-    const irr = years > 0.1 && totalValue > 0 && invested > 0
-      ? ((totalValue / invested) ** (1/years) - 1) * 100 : 0;
+    // IRR via XIRR: investment outflows (dated) + distribution inflows (dated)
+    // + terminal inflow = current portfolio value as of today
+    const xirr = (cashflows: { date: Date; amount: number }[]): number | null => {
+      if (cashflows.length < 2) return null;
+      const t0 = cashflows[0].date.getTime();
+      const yrs = (d: Date) => (d.getTime() - t0) / (1000 * 60 * 60 * 24 * 365.25);
+      const npv = (r: number) => cashflows.reduce((s, cf) => s + cf.amount / Math.pow(1 + r, yrs(cf.date)), 0);
+      let lo = -0.999, hi = 10;
+      let fLo = npv(lo), fHi = npv(hi);
+      if (fLo * fHi > 0) return null;
+      for (let i = 0; i < 100; i++) {
+        const mid = (lo + hi) / 2;
+        const fMid = npv(mid);
+        if (Math.abs(fMid) < 1e-6) return mid * 100;
+        if ((fLo < 0) !== (fMid < 0)) { hi = mid; fHi = fMid; } else { lo = mid; fLo = fMid; }
+      }
+      return ((lo + hi) / 2) * 100;
+    };
+    const cashflows: { date: Date; amount: number }[] = [];
+    txns.filter(t => t.type === 'Investment' && t.date).forEach(t => cashflows.push({ date: new Date(t.date), amount: -t.amount }));
+    txns.filter(t => t.type === 'Distribution' && t.date).forEach(t => cashflows.push({ date: new Date(t.date), amount: t.amount }));
+    if (portfolioValue > 0) cashflows.push({ date: new Date(), amount: portfolioValue });
+    cashflows.sort((a, b) => a.date.getTime() - b.date.getTime());
+    const irr = xirr(cashflows) ?? 0;
 
     // % change vs previous quarter
     const prevQ = QUARTERS[QUARTERS.indexOf(dateToQuarter(new Date())) - 1];
@@ -308,8 +344,8 @@ export default function DashboardPage() {
       {/* ── KPI Cards ── */}
       <div className="grid grid-cols-5 gap-3 mb-5">
         {[
-          { label: 'Invested Capital', value: fmt(kpis.invested), change: null, color: '' },
-          { label: 'Total Fund Value', value: fmt(kpis.totalValue), change: kpis.portfolioChange, color: '' },
+          { label: 'Invested Capital', value: fmtFull(kpis.invested), change: null, color: '' },
+          { label: 'Total Fund Value', value: fmtFull(kpis.totalValue), change: kpis.portfolioChange, color: '' },
           { label: 'IRR',              value: `${kpis.irr.toFixed(1)}%`, change: null, color: kpis.irr > 20 ? 'text-green-600' : kpis.irr > 0 ? 'text-amber-600' : 'text-red-600' },
           { label: 'MOIC',             value: `${kpis.moic.toFixed(2)}x`, change: null, color: kpis.moic >= 2 ? 'text-green-600' : kpis.moic >= 1 ? 'text-amber-600' : 'text-red-600' },
           { label: 'DPI',              value: `${kpis.dpi.toFixed(2)}x`, change: null, color: '' },
@@ -360,11 +396,11 @@ export default function DashboardPage() {
           <div className="text-[13.5px] font-semibold mb-4">Fund Summary</div>
           <div className="space-y-3">
             {[
-              { label: 'Committed Capital',   value: fmt(kpis.committed) },
-              { label: 'Invested Capital',     value: fmt(kpis.invested) },
-              { label: 'Uncalled Capital',     value: fmt(kpis.uncalled) },
-              { label: 'Distributions',        value: fmt(kpis.distributions) },
-              { label: 'Portfolio Value (NAV)', value: fmt(kpis.portfolioValue) },
+              { label: 'Committed Capital',   value: fmtFull(kpis.committed) },
+              { label: 'Invested Capital',     value: fmtFull(kpis.invested) },
+              { label: 'Uncalled Capital',     value: fmtFull(kpis.uncalled) },
+              { label: 'Distributions',        value: fmtFull(kpis.distributions) },
+              { label: 'Portfolio Value (NAV)', value: fmtFull(kpis.portfolioValue) },
             ].map(row => (
               <div key={row.label} className="flex items-center justify-between text-[12.5px]">
                 <span className="text-[#6b6860]">{row.label}</span>
@@ -373,7 +409,7 @@ export default function DashboardPage() {
             ))}
             <div className="pt-2 border-t border-[#e8e6df] flex items-center justify-between text-[13px]">
               <span className="font-semibold">Total Value</span>
-              <span className="font-mono font-bold">{fmt(kpis.totalValue)}</span>
+              <span className="font-mono font-bold">{fmtFull(kpis.totalValue)}</span>
             </div>
             <div className="text-[10.5px] text-[#9b9890]">NAV + Distributions</div>
           </div>
