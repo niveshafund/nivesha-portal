@@ -560,6 +560,43 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const netUnrealizedGainLoss = unrealizedGainLoss + realizedGainLoss;
   const outstandingCap = totalCommitted - totalCalled;
 
+  // ── Fund-level MOIC / DPI / IRR (computed live from transactions + current valuations) ──
+  const totalDistribAll = Object.values(distribByCompanyTop).reduce((s, v) => s + v, 0);
+  const totalCurrentVal = unrealizedCurrentVal + realizedProceeds; // active mark-to-market + cash already returned from realized positions
+  const fundMOIC = totalInvested > 0 ? (totalCurrentVal + 0) / totalInvested : 0;
+  // (totalCurrentVal already includes realizedProceeds, so add unrealized-only distributions for DPI)
+  const fundDPI  = totalInvested > 0 ? totalDistribAll / totalInvested : 0;
+
+  const xirr = (cashflows: { date: Date; amount: number }[]): number | null => {
+    if (cashflows.length < 2) return null;
+    const t0 = cashflows[0].date.getTime();
+    const years = (d: Date) => (d.getTime() - t0) / (1000 * 60 * 60 * 24 * 365.25);
+    const npv = (r: number) => cashflows.reduce((s, cf) => s + cf.amount / Math.pow(1 + r, years(cf.date)), 0);
+    let lo = -0.999, hi = 10;
+    let fLo = npv(lo), fHi = npv(hi);
+    if (fLo * fHi > 0) return null; // no sign change, can't bracket a root
+    for (let i = 0; i < 100; i++) {
+      const mid = (lo + hi) / 2;
+      const fMid = npv(mid);
+      if (Math.abs(fMid) < 1e-6) return mid * 100;
+      if ((fLo < 0) !== (fMid < 0)) { hi = mid; fHi = fMid; } else { lo = mid; fLo = fMid; }
+    }
+    return ((lo + hi) / 2) * 100;
+  };
+
+  const fundCashflows: { date: Date; amount: number }[] = [];
+  txns.filter(t => t.type === 'Investment' && t.company_id && t.date).forEach(t => {
+    fundCashflows.push({ date: new Date(t.date!), amount: -t.amount });
+  });
+  txns.filter(t => t.type === 'Distribution' && t.company_id && t.date).forEach(t => {
+    fundCashflows.push({ date: new Date(t.date!), amount: t.amount });
+  });
+  if (unrealizedCurrentVal > 0) {
+    fundCashflows.push({ date: new Date(), amount: unrealizedCurrentVal });
+  }
+  fundCashflows.sort((a, b) => a.date.getTime() - b.date.getTime());
+  const fundIRR = xirr(fundCashflows);
+
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview',  label: 'Overview' },
     { key: 'portfolio', label: 'Portfolio' },
@@ -624,9 +661,9 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
           </div>
           <div className="grid grid-cols-3 gap-3 mb-5">
             {[
-              { label: 'Net IRR', value: fund.irr  !== 0 ? `${fund.irr.toFixed(1)}%`  : '—', cls: irrColor(fund.irr) },
-              { label: 'MOIC',   value: fund.moic  > 0   ? `${fund.moic.toFixed(2)}x` : '—', cls: moicColor(fund.moic) },
-              { label: 'DPI',    value: `${fund.dpi.toFixed(2)}x`,                            cls: 'text-[#9b9890]' },
+              { label: 'Net IRR', value: fundIRR != null ? `${fundIRR.toFixed(1)}%`  : '—', cls: fundIRR != null ? irrColor(fundIRR) : 'text-gray-400' },
+              { label: 'MOIC',   value: fundMOIC > 0   ? `${fundMOIC.toFixed(2)}x` : '—', cls: moicColor(fundMOIC) },
+              { label: 'DPI',    value: `${fundDPI.toFixed(2)}x`,                            cls: 'text-[#9b9890]' },
             ].map(k => (
               <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
                 <label className="text-[11px] text-[#6b6860] block mb-1.5">{k.label}</label>
