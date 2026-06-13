@@ -514,7 +514,8 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   const totalInvested  = txns.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
   const totalExpenses  = expenses.reduce((s, e) => s + e.amount, 0);
   const adminFeeTotal  = totalCalled * ((fund.management_fee || 0) / 100) * (fund.fund_life || 10);
-  const availCash      = totalCalled - totalInvested - totalExpenses;
+  const totalDistributions = lps.reduce((s, lp) => s + (lp.distributions || 0), 0);
+  const availCash      = totalCalled - adminFeeTotal - totalInvested + totalDistributions;
   const outstandingCap = totalCommitted - totalCalled;
 
   const tabs: { key: Tab; label: string }[] = [
@@ -568,7 +569,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
             {[
               { label: 'Committed Capital',   value: fmtFull(totalCommitted), sub: 'Total LP commitments',         color: '' },
               { label: 'Invested Capital',    value: fmtFull(totalInvested),  sub: 'Deployed into companies',      color: '' },
-              { label: 'Available Cash',      value: fmtFull(availCash),      sub: 'Called − Invested − Fees Paid', color: availCash >= 0 ? 'text-green-600' : 'text-red-600' },
+              { label: 'Available Cash',      value: fmtFull(availCash),      sub: 'Called − Admin Fee − Invested + Distributions', color: availCash >= 0 ? 'text-green-600' : 'text-red-600' },
               { label: 'Admin Fee (Total)',   value: fmtFull(adminFeeTotal),  sub: `${fund.management_fee || 0}% × ${fund.fund_life || 10}yr of called`, color: 'text-amber-600' },
               { label: 'Outstanding Capital', value: fmtFull(outstandingCap), sub: 'Committed but not yet called', color: 'text-[#6b6860]' },
             ].map(k => (
