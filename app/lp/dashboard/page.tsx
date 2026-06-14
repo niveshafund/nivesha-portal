@@ -313,12 +313,16 @@ export default function LPDashboardPage() {
 
   // ── Fix #6: Chart data — sort ascending so chart goes up over time ──
   const latestByCompanyByQuarter: Record<string, Record<string, number>> = {};
+  const latestDateByCompanyByQuarter: Record<string, Record<string, string>> = {};
   valuations.forEach(v => {
-    if (!latestByCompanyByQuarter[v.quarter]) latestByCompanyByQuarter[v.quarter] = {};
-    // Keep latest entry per company per quarter
-    if (!latestByCompanyByQuarter[v.quarter][v.company_id] ||
-        v.quarter_end > (latestByCompanyByQuarter[v.quarter][v.company_id] ?? '')) {
+    if (!latestByCompanyByQuarter[v.quarter]) {
+      latestByCompanyByQuarter[v.quarter] = {};
+      latestDateByCompanyByQuarter[v.quarter] = {};
+    }
+    const existingDate = latestDateByCompanyByQuarter[v.quarter][v.company_id] ?? '';
+    if (!latestByCompanyByQuarter[v.quarter][v.company_id] || v.quarter_end > existingDate) {
       latestByCompanyByQuarter[v.quarter][v.company_id] = v.value;
+      latestDateByCompanyByQuarter[v.quarter][v.company_id] = v.quarter_end;
     }
   });
   // Also include current portfolio value for the most recent quarter if no valuation exists
