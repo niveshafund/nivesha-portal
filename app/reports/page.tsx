@@ -130,17 +130,17 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<FilterTab>('All');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   async function handleDelete(id: string) {
-    if (!confirm('Delete this report? This cannot be undone.')) return;
     setDeletingId(id);
+    setConfirmDeleteId(null);
     try {
       const { error } = await supabase.from('reports').delete().eq('id', id);
       if (error) throw error;
       setReports(prev => prev.filter(r => r.id !== id));
     } catch (e) {
       console.error(e);
-      alert('Failed to delete report');
     } finally {
       setDeletingId(null);
     }
@@ -291,7 +291,7 @@ export default function ReportsPage() {
                             View →
                           </Link>
                           <button
-                            onClick={() => handleDelete(r.id)}
+                            onClick={() => setConfirmDeleteId(r.id)}
                             disabled={deletingId === r.id}
                             className="text-[12px] text-red-400 hover:text-red-600 transition-colors disabled:opacity-40"
                             title="Delete report"
@@ -318,6 +318,45 @@ export default function ReportsPage() {
           )}
         </div>
       </div>
+
+      {/* ── Delete Confirmation Modal ── */}
+      {confirmDeleteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setConfirmDeleteId(null)} />
+          <div className="relative bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm mx-4">
+            <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center mb-4">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5 text-red-500">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6l-1 14H6L5 6"/>
+                <path d="M10 11v6"/><path d="M14 11v6"/>
+                <path d="M9 6V4h6v2"/>
+              </svg>
+            </div>
+            <div className="text-[15px] font-semibold mb-1">Delete report?</div>
+            <p className="text-[12.5px] text-[#9b9890] mb-5">
+              {(() => {
+                const r = reports.find(r => r.id === confirmDeleteId);
+                return r ? `"${r.name}" will be permanently deleted. This cannot be undone.` : 'This report will be permanently deleted.';
+              })()}
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setConfirmDeleteId(null)}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDelete(confirmDeleteId)}
+                disabled={deletingId === confirmDeleteId}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] font-medium bg-red-500 text-white hover:bg-red-600 disabled:opacity-60 transition-colors"
+              >
+                {deletingId === confirmDeleteId ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
