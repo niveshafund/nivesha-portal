@@ -76,5 +76,16 @@ export async function DELETE(
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
+  // Audit log
+  await supabaseAdmin.from('audit_logs').insert({
+    action:       'user_deleted',
+    actor_id:     user.id,
+    actor_email:  user.email,
+    target_email: roleRow?.email ?? null,
+    details:      JSON.stringify({ deleted_user_id: userId }),
+  }).then(({ error: auditErr }) => {
+    if (auditErr) console.warn('[user-delete] audit log failed:', auditErr.message);
+  });
+
   return NextResponse.json({ success: true });
 }
