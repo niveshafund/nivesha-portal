@@ -77,23 +77,54 @@ export default function AnalyticsPage() {
     })();
   }, []);
 
-  // Build per-company rows with live MOIC/IRR
+  // Build per-company rows with live MOIC/IRR — mirrors GP portal logic exactly
   const companyRows: CompanyRow[] = allCompanies.map(co => {
-    const txns = allTxns.filter(t => t.company_id === co.id && t.type === 'Investment');
+    const invTxns  = allTxns.filter(t => t.company_id === co.id && t.type === 'Investment');
     const distTxns = allTxns.filter(t => t.company_id === co.id && t.type === 'Distribution');
-    const totalInvested = txns.reduce((s, t) => s + t.amount, 0);
-    const distributions = distTxns.reduce((s, t) => s + t.amount, 0);
-    const coVals = allVals.filter(v => v.company_id === co.id).sort((a, b) => b.quarter.localeCompare(a.quarter));
-    const latestVal = coVals[0] ?? null;
-    const currentValue = latestVal != null ? latestVal.value : (co.unrealised ?? totalInvested);
-    const moic = totalInvested > 0 ? currentValue / totalInvested : 0;
-    // IRR: years from first investment
-    const firstTxn = txns.sort((a, b) => a.date.localeCompare(b.date))[0];
+    const totalInvested  = invTxns.reduce((s, t) => s + t.amount, 0);
+    const distributions  = distTxns.reduce((s, t) => s + t.amount, 0);
+    const isExited = co.status === 'Exited' || co.status === 'Written Off';
+
+    // Per-transaction valuation (latest quarter_end wins)
+    const latestValByTxn: Record<string, DbValuation> = {};
+    allVals.filter(v => (v as any).transaction_id).forEach(v => {
+      const id = (v as any).transaction_id;
+      const ex = latestValByTxn[id];
+      if (!ex || v.quarter_end > ex.quarter_end) latestValByTxn[id] = v;
+    });
+    const latestValByCo = allVals
+      .filter(v => v.company_id === co.id)
+      .sort((a, b) => b.quarter_end.localeCompare(a.quarter_end))[0] ?? null;
+    const investCount = invTxns.length;
+
+    // Sum current value across all investment rounds
+    const currentValue = isExited ? 0 : invTxns.reduce((sum, t) => {
+      const txnVal = latestValByTxn[t.id];
+      if (txnVal?.value != null) return sum + txnVal.value;
+      if (latestValByCo?.value != null) {
+        if (investCount === 1) return sum + latestValByCo.value;
+        const entryVal = (t as any).valuation_cap ?? null;
+        const companyValue = (latestValByCo as any).company_value ?? 0;
+        return sum + (entryVal && entryVal > 0 && companyValue > 0
+          ? (t.amount / entryVal) * companyValue : t.amount);
+      }
+      return sum + t.amount; // cost basis fallback
+    }, 0);
+
+    const moic = totalInvested > 0
+      ? isExited ? distributions / totalInvested : currentValue / totalInvested
+      : 0;
+
+    // IRR via simple CAGR per company (XIRR would require dated cashflows per company)
+    const firstTxn = [...invTxns].sort((a, b) => a.date.localeCompare(b.date))[0];
     let irr: number | null = null;
     if (firstTxn && totalInvested > 0) {
       const years = (Date.now() - new Date(firstTxn.date).getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-      if (years >= 1) {
-        irr = currentValue === 0 ? -100 : ((currentValue / totalInvested) ** (1 / years) - 1) * 100;
+      const terminal = isExited ? distributions : currentValue;
+      if (years >= 1 && terminal > 0) {
+        irr = ((terminal / totalInvested) ** (1 / years) - 1) * 100;
+      } else if (isExited && terminal === 0) {
+        irr = -100;
       }
     }
     const dpi = totalInvested > 0 ? distributions / totalInvested : 0;
