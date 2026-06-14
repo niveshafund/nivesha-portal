@@ -16,7 +16,7 @@ type Fund = { id: string; name: string; vintage: number; nav: number; management
 type LPTxn = { id: string; date: string; amount: number; type: string; notes?: string };
 type Company = { id: string; name: string; sector?: string; stage?: string; invested: number; unrealised: number };
 type LPDoc = { id: string; name: string; file_path: string; file_size?: number; file_type?: string; doc_type?: string; created_at: string };
-type Valuation = { company_id: string; quarter: string; quarter_end: string; value: number };
+type Valuation = { id?: string; company_id: string; transaction_id?: string; quarter: string; quarter_end: string; value: number; company_value?: number };
 
 // ─── Helpers ──────────────────────────────────────────────────
 function fmt(n: number, compact = false) {
@@ -144,6 +144,7 @@ export default function LPDashboardPage() {
   const [txns, setTxns]         = useState<LPTxn[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [valuations, setValuations] = useState<Valuation[]>([]);
+  const [fundTxns, setFundTxns]     = useState<any[]>([]);
   const [loading, setLoading]   = useState(true);
   const [view, setView]           = useState<'my-share' | 'fund-total'>('my-share');
   const [tab, setTab]             = useState<'performance' | 'documents'>('performance');
@@ -180,12 +181,14 @@ export default function LPDashboardPage() {
         { data: compData },
         { data: valData },
         { data: docData },
+        { data: fundTxnData },
       ] = await Promise.all([
         supabase.from('funds').select('id,name,vintage,nav,management_fee,fund_life').eq('id', lpData.fund_id).single(),
         supabase.from('lp_transactions').select('*').eq('lp_id', lpData.id).order('date'),
-        supabase.from('companies').select('id,name,sector,stage,invested,unrealised').eq('fund_id', lpData.fund_id).eq('status', 'Active'),
-        supabase.from('valuations').select('company_id,quarter,quarter_end,value').eq('fund_id', lpData.fund_id).order('quarter_end'),
+        supabase.from('companies').select('id,name,sector,stage,invested,unrealised,status').eq('fund_id', lpData.fund_id),
+        supabase.from('valuations').select('id,company_id,transaction_id,quarter,quarter_end,value,company_value').eq('fund_id', lpData.fund_id).order('quarter_end'),
         supabase.from('lp_documents').select('*').eq('lp_id', lpData.id).order('created_at', { ascending: false }),
+        supabase.from('transactions').select('id,company_id,type,amount,valuation_cap').eq('fund_id', lpData.fund_id),
       ]);
 
       setFund(fundData as Fund);
@@ -193,6 +196,7 @@ export default function LPDashboardPage() {
       setCompanies((compData ?? []) as Company[]);
       setValuations((valData ?? []) as Valuation[]);
       setDocuments((docData ?? []) as LPDoc[]);
+      setFundTxns((fundTxnData ?? []) as any[]);
     } finally {
       setLoading(false);
     }
