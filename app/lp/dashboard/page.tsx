@@ -356,13 +356,14 @@ export default function LPDashboardPage() {
   const fundTotalInvested = fundUnrealisedCost + realizedCost;
   const totalDeployed = view === 'my-share' ? fundTotalInvested * share : fundTotalInvested;
 
-  // Undeployed cash = Called − Admin Fee − Total Invested (all) + Distributions received
-  // Uses all invested capital (not just active) and adds back exit proceeds
-  // This gives actual cash in the bank account — matches GP portal Available Cash
+  // Undeployed cash = Called − Admin Fee − Active Deployed + Exit proceeds received back into fund
+  // Uses realizedProceeds (cash from exits back to fund), NOT lp.distributions (cash paid out to LP)
   const totalCalled    = view === 'my-share' ? capitalCalled : fundTotalCalled;
   const fundDistribs   = Object.values(distribByCo).reduce((s, v) => s + v, 0);
   const distribs       = view === 'my-share' ? distributions : fundDistribs;
-  const undeployedCash = Math.max(0, totalCalled - managementFees - totalDeployed + distribs);
+  const exitProceedsShare = view === 'my-share' ? realizedProceeds * share : realizedProceeds;
+  const deployedForCash   = view === 'my-share' ? fundTotalInvested * share : fundTotalInvested;
+  const undeployedCash    = Math.max(0, totalCalled - managementFees - deployedForCash + exitProceedsShare);
 
   // Net gain (using net unrealized = the GP-portal-matching figure)
   const netGain    = netUnrealisedGL - managementFees - undeployedCash;
