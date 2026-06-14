@@ -154,17 +154,21 @@ export default function LPDashboardPage() {
 
   async function openDoc(doc: LPDoc) {
     setOpeningDocId(doc.id);
-    const win = window.open('', '_blank', 'noopener,noreferrer');
     try {
       const { data, error } = await supabase.storage
         .from('lp-documents')
-        .createSignedUrl(doc.file_path, 300); // 5 min expiry
+        .createSignedUrl(doc.file_path, 300);
       if (error || !data?.signedUrl) throw error ?? new Error('No URL');
-      // PDFs render natively in browsers via signed URL
-      if (win) win.location.href = data.signedUrl;
+      // Use anchor click — most reliable cross-browser way to open files
+      const a = document.createElement('a');
+      a.href = data.signedUrl;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     } catch (e) {
       console.error('[openDoc]', e);
-      if (win) win.close();
     } finally {
       setOpeningDocId(null);
     }
