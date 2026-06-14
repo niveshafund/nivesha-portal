@@ -352,18 +352,24 @@ export default function LPDashboardPage() {
     ? fundUnrealisedCost * share   // only active (excludes written-off/exited cost basis)
     : fundUnrealisedCost;
 
-  // Undeployed cash
+  // Total invested across ALL positions (active + exited + written-off)
+  const fundTotalInvested = fundUnrealisedCost + realizedCost;
+  const totalDeployed = view === 'my-share' ? fundTotalInvested * share : fundTotalInvested;
+
+  // Undeployed cash = Called − Admin Fee − Total Invested (all) + Distributions received
+  // Uses all invested capital (not just active) and adds back exit proceeds
+  // This gives actual cash in the bank account — matches GP portal Available Cash
   const totalCalled    = view === 'my-share' ? capitalCalled : fundTotalCalled;
-  const undeployedCash = Math.max(0, totalCalled - deployed - managementFees);
+  const fundDistribs   = Object.values(distribByCo).reduce((s, v) => s + v, 0);
+  const distribs       = view === 'my-share' ? distributions : fundDistribs;
+  const undeployedCash = Math.max(0, totalCalled - managementFees - totalDeployed + distribs);
 
   // Net gain (using net unrealized = the GP-portal-matching figure)
   const netGain    = netUnrealisedGL - managementFees - undeployedCash;
   const netGainPct = totalCalled > 0 ? (netGain / totalCalled * 100).toFixed(1) : '0.0';
 
   // Total value = portfolio NAV + distributions received
-  const fundDistribs = Object.values(distribByCo).reduce((s, v) => s + v, 0);
   const totalIn    = view === 'my-share' ? capitalCalled : fundTotalCalled;
-  const distribs   = view === 'my-share' ? distributions : fundDistribs;
   const totalValue = portfolioValue + distribs;
   const netMOIC    = totalIn > 0 ? totalValue / totalIn : 0;
   const grossMOIC  = netInvested > 0 ? totalValue / netInvested : 0;
