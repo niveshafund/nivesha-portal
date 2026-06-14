@@ -371,61 +371,173 @@ export default function LPReportPage() {
 
       // 2. Upload HTML snapshot to LP documents (for each selected LP)
       const targetLPs = lpId === 'all' ? lps : lps.filter(l => l.id === lpId);
-      if (targetLPs.length > 0 && reportRef.current) {
-        // Generate PDF from report preview using html2canvas + jsPDF
-        const html2canvas = (await import('html2canvas')).default;
-        const { jsPDF }   = await import('jspdf');
-
-        const canvas = await html2canvas(reportRef.current, {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: '#f9f8f5',
-          logging: false,
-          onclone: (_doc: Document, el: HTMLElement) => {
-            // Replace unsupported CSS color functions (oklch, lab, lch, oklab)
-            // that html2canvas can't parse — convert to safe hex fallbacks
-            const replaceColors = (node: HTMLElement) => {
-              const style = node.style;
-              const computed = window.getComputedStyle(node);
-              // Override color and background-color with computed RGB values
-              const color = computed.color;
-              const bg    = computed.backgroundColor;
-              if (color && !color.startsWith('oklch') && !color.startsWith('lab')) {
-                style.color = color;
-              }
-              if (bg && !bg.startsWith('oklch') && !bg.startsWith('lab')) {
-                style.backgroundColor = bg;
-              }
-              Array.from(node.children).forEach(child => replaceColors(child as HTMLElement));
-            };
-            replaceColors(el);
-          },
-        });
-
-        const imgWidth  = 210; // A4 width in mm
-        const imgHeight = (canvas.height * imgWidth) / canvas.width;
-        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-
-        // Split across multiple pages if content is taller than A4
-        const pageHeight = 297; // A4 height in mm
-        let yOffset = 0;
-        while (yOffset < imgHeight) {
-          if (yOffset > 0) pdf.addPage();
-          pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, -yOffset, imgWidth, imgHeight);
-          yOffset += pageHeight;
-        }
-
-        const pdfBlob = pdf.output('blob');
-        const fileName = `${reportName.trim().replace(/[^a-zA-Z0-9-_ ]/g, '')}.pdf`;
+      if (targetLPs.length > 0) {
+        // Generate PDF using jsPDF text API directly — no DOM capture, no color parsing issues
+        const { jsPDF } = await import('jspdf');
 
         for (const lp of targetLPs) {
+          const lpShare    = lp.ownership_pct / 100;
+          const pdf        = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+          const W          = 210;
+          const margin     = 16;
+          const col2       = W / 2 + margin;
+          let y            = margin;
+
+          const hex = (color: string) => { pdf.setTextColor(color); };
+          const line = (x1: number, y1: number, x2: number, y2: number, color = '#e8e6df') => {
+            pdf.setDrawColor(color);
+            pdf.setLineWidth(0.3);
+            pdf.line(x1, y1, x2, y2);
+          };
+          const fmt = (n: number) => n >= 1_000_000
+            ? `$${(n/1_000_000).toFixed(2)}M`
+            : n >= 1_000 ? `$${(n/1_000).toFixed(1)}K` : `$${n.toLocaleString()}`;
+          const fmtFull = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+          // ── Header ──
+          pdf.setFillColor('#1a1915');
+          pdf.rect(0, 0, W, 22, 'F');
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(14);
+          pdf.setTextColor('#ffffff');
+          pdf.text('Nivesha Ventures', margin, 10);
+          pdf.setFontSize(9);
+          pdf.setFont('helvetica', 'normal');
+          pdf.text('LP Report — Confidential', margin, 16);
+          pdf.text(`Generated: ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`, W - margin, 16, { align: 'right' });
+          y = 30;
+
+          // ── Report Title ──
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(16);
+          hex('#1a1915');
+          pdf.text(reportName.trim(), margin, y);
+          y += 6;
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(9);
+          hex('#6b6860');
+          pdf.text(`Fund: ${fund?.name}   ·   LP: ${lp.name}   ·   Reporting Period: ${quarterLabel(quarter)}`, margin, y);
+          y += 10;
+          line(margin, y, W - margin, y);
+          y += 6;
+
+          // ── LP Details & Performance ──
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(10);
+          hex('#1a1915');
+          pdf.text('LP Performance Overview', margin, y);
+          y += 5;
+
+          const lpCalled   = lp.called;
+          const adminFee   = (fund?.management_fee ?? 1) / 100 * (fund?.fund_life ?? 10) * lpCalled;
+          const lpPortVal  = fundMetrics.portfolioValue * lpShare;
+          const lpInvested = fundMetrics.invested * lpShare;
+          const lpMOIC     = lpInvested > 0 ? (lpPortVal + lp.distributions) / lpInvested : 1;
+
+          const detailRows = [
+            ['LP Name', lp.name,           'MOIC',    `${lpMOIC.toFixed(2)}x`],
+            ['Fund Ownership', `${lp.ownership_pct.toFixed(1)}%`, 'IRR', `${lpMetrics.irr.toFixed(1)}%`],
+            ['Commitment', fmtFull(lp.commitment), 'DPI', `${lpMetrics.dpi.toFixed(2)}x`],
+            ['Capital Called', fmtFull(lpCalled), '', ''],
+          ];
+
+          detailRows.forEach(([l1, v1, l2, v2]) => {
+            pdf.setFont('helvetica', 'normal');
+            pdf.setFontSize(9);
+            hex('#6b6860');
+            pdf.text(l1, margin, y);
+            pdf.setFont('helvetica', 'bold');
+            hex('#1a1915');
+            pdf.text(v1, margin + 42, y);
+            if (l2) {
+              pdf.setFont('helvetica', 'normal');
+              hex('#6b6860');
+              pdf.text(l2, col2, y);
+              pdf.setFont('helvetica', 'bold');
+              hex('#2d5be3');
+              pdf.text(v2, col2 + 42, y);
+            }
+            y += 5;
+          });
+          y += 4;
+          line(margin, y, W - margin, y);
+          y += 6;
+
+          // ── Financial Summary ──
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(10);
+          hex('#1a1915');
+          pdf.text('LP Financial Summary', margin, y);
+          y += 5;
+
+          const summaryRows: [string, string, string][] = [
+            ['Commitment',      fmtFull(fund?.committed ?? 0),          fmtFull(lp.commitment)],
+            ['Capital Called',  fmtFull(fundMetrics.called),             fmtFull(lpCalled)],
+            ['Admin Fee',       fmtFull(adminFee / lpShare),             fmtFull(adminFee)],
+            ['Invested Capital',fmtFull(fundMetrics.invested),           fmtFull(lpInvested)],
+            ['Portfolio Value', fmtFull(fundMetrics.portfolioValue),     fmtFull(lpPortVal)],
+            ['Distributions',   fmtFull(fundMetrics.distributions),      fmtFull(lp.distributions)],
+            ['Total Value',     fmtFull(fundMetrics.totalValue),         fmtFull(lpPortVal + lp.distributions)],
+          ];
+
+          // Table header
+          pdf.setFontSize(8);
+          pdf.setFont('helvetica', 'bold');
+          hex('#9b9890');
+          pdf.text('METRIC', margin, y);
+          pdf.text('FUND TOTAL', W - margin - 60, y);
+          pdf.text('LP SHARE', W - margin - 20, y, { align: 'right' });
+          y += 3;
+          line(margin, y, W - margin, y, '#1a1915');
+          y += 4;
+
+          summaryRows.forEach(([label, fundVal, lpVal]) => {
+            pdf.setFont('helvetica', 'normal');
+            pdf.setFontSize(9);
+            hex('#1a1915');
+            pdf.text(label, margin, y);
+            hex('#6b6860');
+            pdf.text(fundVal, W - margin - 60, y);
+            pdf.setFont('helvetica', 'bold');
+            hex('#2d5be3');
+            pdf.text(lpVal, W - margin, y, { align: 'right' });
+            y += 5;
+            line(margin, y - 1.5, W - margin, y - 1.5);
+          });
+          y += 4;
+
+          // ── Commentary ──
+          if (commentary.trim()) {
+            line(margin, y, W - margin, y);
+            y += 6;
+            pdf.setFont('helvetica', 'bold');
+            pdf.setFontSize(10);
+            hex('#1a1915');
+            pdf.text('Commentary', margin, y);
+            y += 5;
+            pdf.setFont('helvetica', 'normal');
+            pdf.setFontSize(9);
+            hex('#3d3b35');
+            const lines = pdf.splitTextToSize(commentary.trim(), W - margin * 2);
+            pdf.text(lines, margin, y);
+          }
+
+          // ── Footer ──
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(7.5);
+          hex('#9b9890');
+          pdf.text('This report is confidential and intended solely for the named LP. Past performance is not indicative of future results.', margin, 285);
+          line(margin, 282, W - margin, 282);
+
+          const pdfBlob = pdf.output('blob');
+          const fileName = `${reportName.trim().replace(/[^a-zA-Z0-9-_ ]/g, '')}-${lp.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
           const filePath = `${lp.id}/${Date.now()}-${fileName}`;
+
           const { error: uploadErr } = await supabase.storage
             .from('lp-documents')
             .upload(filePath, pdfBlob, { contentType: 'application/pdf', upsert: false });
-          if (uploadErr) { console.warn(`[save-report] storage upload failed for ${lp.name}:`, uploadErr.message); continue; }
+          if (uploadErr) { console.warn(`[save-report] upload failed for ${lp.name}:`, uploadErr.message); continue; }
 
-          // Insert lp_documents row so it appears in LP's Documents tab
           await supabase.from('lp_documents').insert({
             lp_id:       lp.id,
             fund_id:     fundId,
