@@ -372,31 +372,38 @@ export default function LPReportPage() {
       // 2. Upload HTML snapshot to LP documents (for each selected LP)
       const targetLPs = lpId === 'all' ? lps : lps.filter(l => l.id === lpId);
       if (targetLPs.length > 0 && reportRef.current) {
-        const htmlContent = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <title>${reportName.trim()}</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; color: #1a1915; margin: 0; padding: 24px; background: #f9f8f5; }
-    * { box-sizing: border-box; }
-    .bg-white { background: #fff; } .rounded-xl { border-radius: 12px; } .border { border: 1px solid #e8e6df; } .p-6 { padding: 24px; } .mb-4 { margin-bottom: 16px; } .mb-2 { margin-bottom: 8px; }
-    table { width: 100%; border-collapse: collapse; } th, td { padding: 8px 16px; border-bottom: 1px solid #e8e6df; text-align: left; font-size: 12.5px; }
-    th { font-size: 11px; color: #9b9890; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
-  </style>
-</head>
-<body>
-${reportRef.current.innerHTML}
-</body>
-</html>`;
-        const blob = new Blob([htmlContent], { type: 'text/html' });
-        const fileName = `${reportName.trim().replace(/[^a-zA-Z0-9-_ ]/g, '')}.html`;
+        // Generate PDF from report preview using html2canvas + jsPDF
+        const html2canvas = (await import('html2canvas')).default;
+        const { jsPDF }   = await import('jspdf');
+
+        const canvas = await html2canvas(reportRef.current, {
+          scale: 2,           // retina quality
+          useCORS: true,
+          backgroundColor: '#f9f8f5',
+          logging: false,
+        });
+
+        const imgWidth  = 210; // A4 width in mm
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+        // Split across multiple pages if content is taller than A4
+        const pageHeight = 297; // A4 height in mm
+        let yOffset = 0;
+        while (yOffset < imgHeight) {
+          if (yOffset > 0) pdf.addPage();
+          pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, -yOffset, imgWidth, imgHeight);
+          yOffset += pageHeight;
+        }
+
+        const pdfBlob = pdf.output('blob');
+        const fileName = `${reportName.trim().replace(/[^a-zA-Z0-9-_ ]/g, '')}.pdf`;
 
         for (const lp of targetLPs) {
           const filePath = `${lp.id}/${Date.now()}-${fileName}`;
           const { error: uploadErr } = await supabase.storage
             .from('lp-documents')
-            .upload(filePath, blob, { contentType: 'text/html', upsert: false });
+            .upload(filePath, pdfBlob, { contentType: 'application/pdf', upsert: false });
           if (uploadErr) { console.warn(`[save-report] storage upload failed for ${lp.name}:`, uploadErr.message); continue; }
 
           // Insert lp_documents row so it appears in LP's Documents tab
@@ -405,8 +412,8 @@ ${reportRef.current.innerHTML}
             fund_id:     fundId,
             name:        reportName.trim(),
             file_path:   filePath,
-            file_size:   blob.size,
-            file_type:   'text/html',
+            file_size:   pdfBlob.size,
+            file_type:   'application/pdf',
             doc_type:    'Quarterly Report',
             notes:       `${quarterLabel(quarter)} LP Report`,
             uploaded_by: 'GP',
