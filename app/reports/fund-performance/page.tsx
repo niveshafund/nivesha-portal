@@ -144,9 +144,10 @@ function calcMetrics(
   const netUnrealisedGL = unrealisedGL + realizedGL;
   const portfolioValue  = unrealisedCurrentVal;
   const invested        = unrealisedCost + realizedCost;
-  const distributions   = Object.values(distribByCo).reduce((s, v) => s + v, 0);
+  // Distributions = LP payouts only (exit proceeds reinvested into fund, not paid to LPs)
+  const distributions   = lps.reduce((s, lp) => s + (lp.distributions ?? 0), 0);
   const totalValue      = portfolioValue + distributions;
-  const moic            = invested > 0 ? totalValue / invested : 1;
+  const moic            = invested > 0 ? portfolioValue / invested : 1; // NAV only
   const dpi             = invested > 0 ? distributions / invested : 0;
 
   // XIRR over all cashflows
@@ -244,24 +245,60 @@ export default function FundPerformancePage() {
 
   // Per-company rows for Portfolio Company Summary
   const companyRows = useMemo(() => {
+    const cutoff = new Date(qEnd);
+    const fv = valuations.filter(v => new Date(v.quarter_end) <= cutoff);
+    const coStatusMap: Record<string, string> = {};
+    companies.forEach(c => { coStatusMap[c.id] = (c as any).status ?? 'Active'; });
+    const latestValByTxn: Record<string, DbValuation> = {};
+    fv.forEach(v => {
+      if (!(v as any).transaction_id) return;
+      const ex = latestValByTxn[(v as any).transaction_id];
+      if (!ex || v.quarter_end > ex.quarter_end) latestValByTxn[(v as any).transaction_id] = v;
+    });
+    const latestValByCo: Record<string, DbValuation> = {};
+    fv.forEach(v => {
+      if (!v.company_id) return;
+      const ex = latestValByCo[v.company_id];
+      if (!ex || v.quarter_end > ex.quarter_end) latestValByCo[v.company_id] = v;
+    });
+    const investCountByCo: Record<string, number> = {};
+    txns.filter(t => t.type === 'Investment' && t.company_id && new Date(t.date) <= cutoff)
+      .forEach(t => { investCountByCo[t.company_id!] = (investCountByCo[t.company_id!] ?? 0) + 1; });
+
     return companies.map(co => {
       const coInvTxns = txns.filter(t => t.company_id === co.id && t.type === 'Investment'
-        && new Date(t.date) <= new Date(qEnd));
+        && new Date(t.date) <= cutoff);
       const invested = coInvTxns.reduce((s, t) => s + t.amount, 0);
       const distributed = txns
-        .filter(t => t.company_id === co.id && t.type === 'Distribution' && new Date(t.date) <= new Date(qEnd))
+        .filter(t => t.company_id === co.id && t.type === 'Distribution' && new Date(t.date) <= cutoff)
         .reduce((s, t) => s + t.amount, 0);
-      const latestVal = valuations
-        .filter(v => v.company_id === co.id && new Date(v.quarter_end) <= new Date(qEnd))
-        .sort((a, b) => b.quarter_end.localeCompare(a.quarter_end))[0];
-      const currentValue = latestVal ? latestVal.value : invested;
-      const totalValue   = currentValue + distributed;
-      const moic         = invested > 0 ? totalValue / invested : 1;
-      const firstDate    = coInvTxns.sort((a, b) => a.date.localeCompare(b.date))[0]?.date ?? null;
+
+      const isExited = coStatusMap[co.id] === 'Exited' || coStatusMap[co.id] === 'Written Off';
+      const currentValue = isExited ? 0 : coInvTxns.reduce((sum, t) => {
+        const txnVal = latestValByTxn[t.id];
+        if (txnVal?.value != null) return sum + txnVal.value;
+        const coVal = latestValByCo[co.id];
+        if (coVal?.value != null) {
+          if (investCountByCo[co.id] === 1) return sum + coVal.value;
+          const entryVal = (t as any).valuation_cap ?? null;
+          const companyValue = (coVal as any).company_value ?? 0;
+          return sum + (entryVal && entryVal > 0 && companyValue > 0
+            ? (t.amount / entryVal) * companyValue : t.amount);
+        }
+        return sum + t.amount;
+      }, 0);
+
+      const totalValue = currentValue + distributed;
+      const moic = invested > 0
+        ? isExited ? distributed / invested : currentValue / invested
+        : 1;
+      const firstDate = [...coInvTxns].sort((a, b) => a.date.localeCompare(b.date))[0]?.date ?? null;
       let irr = 0;
-      if (firstDate && invested > 0 && totalValue > 0) {
+      if (firstDate && invested > 0) {
+        const terminal = isExited ? distributed : currentValue;
         const yrs = (Date.now() - new Date(firstDate).getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-        if (yrs > 0.1) irr = ((totalValue / invested) ** (1 / yrs) - 1) * 100;
+        if (yrs > 0.1 && terminal > 0) irr = ((terminal / invested) ** (1 / yrs) - 1) * 100;
+        else if (isExited && terminal === 0) irr = -100;
       }
       return { co, invested, distributed, currentValue, totalValue, moic, irr };
     }).sort((a, b) => b.invested - a.invested);
