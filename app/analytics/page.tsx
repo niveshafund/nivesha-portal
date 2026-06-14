@@ -174,7 +174,7 @@ export default function AnalyticsPage() {
   });
 
   const topPerformer = [...companyRows].sort((a, b) => b.moic - a.moic)[0];
-  const needsAttention = [...companyRows].filter(r => r.company.status !== 'Written Off').sort((a, b) => a.moic - b.moic)[0];
+  const needsAttention = [...companyRows].filter(r => r.company.status !== 'Written Off' && r.company.status !== 'Exited').sort((a, b) => a.moic - b.moic)[0];
 
   const avgMoic = companyRows.length > 0 ? companyRows.reduce((s, r) => s + r.moic, 0) / companyRows.length : 0;
   const irrRows = companyRows.filter(r => r.irr != null);
