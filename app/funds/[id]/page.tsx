@@ -659,6 +659,23 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
               </div>
             ))}
           </div>
+          <div className="grid grid-cols-4 gap-3 mb-5">
+            {(() => {
+              const totalFundValue = unrealizedCurrentVal + realizedProceeds + totalDistributions;
+              return [
+                { label: 'Realized Gain/Loss',       value: fmtFull(realizedGainLoss),      sub: 'Distributions − cost basis of Exited/Written Off positions', cls: realizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
+                { label: 'Unrealized Gain/Loss',     value: fmtFull(unrealizedGainLoss),    sub: 'Current value − cost basis of Active positions',              cls: unrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
+                { label: 'Net Unrealized Gain/Loss', value: fmtFull(netUnrealizedGainLoss), sub: 'Unrealized + Realized',                                       cls: netUnrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
+                { label: 'Total Fund Value',         value: fmtFull(totalFundValue),        sub: 'NAV + Distributions',                                        cls: 'text-[#2d5be3]' },
+              ];
+            })().map(k => (
+              <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
+                <label className="text-[11px] text-[#6b6860] block mb-1.5">{k.label}</label>
+                <div className={`text-[18px] font-semibold font-mono mb-1 ${k.cls}`}>{k.value}</div>
+                <div className="text-[10.5px] text-[#9b9890]">{k.sub}</div>
+              </div>
+            ))}
+          </div>
           <div className="grid grid-cols-3 gap-3 mb-5">
             {[
               { label: 'Net IRR', value: fundIRR != null ? `${fundIRR.toFixed(1)}%`  : '—', cls: fundIRR != null ? irrColor(fundIRR) : 'text-gray-400' },
@@ -668,19 +685,6 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
               <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
                 <label className="text-[11px] text-[#6b6860] block mb-1.5">{k.label}</label>
                 <div className={`text-[24px] font-semibold font-mono ${k.cls}`}>{k.value}</div>
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-3 gap-3 mb-5">
-            {[
-              { label: 'Realized Gain/Loss',       value: fmtFull(realizedGainLoss),       sub: 'Distributions − cost basis of Exited/Written Off positions', cls: realizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
-              { label: 'Unrealized Gain/Loss',     value: fmtFull(unrealizedGainLoss),     sub: 'Current value − cost basis of Active positions',              cls: unrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
-              { label: 'Net Unrealized Gain/Loss', value: fmtFull(netUnrealizedGainLoss),  sub: 'Unrealized + Realized',                                  cls: netUnrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
-            ].map(k => (
-              <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
-                <label className="text-[11px] text-[#6b6860] block mb-1.5">{k.label}</label>
-                <div className={`text-[18px] font-semibold font-mono mb-1 ${k.cls}`}>{k.value}</div>
-                <div className="text-[10.5px] text-[#9b9890]">{k.sub}</div>
               </div>
             ))}
           </div>
