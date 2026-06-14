@@ -247,91 +247,145 @@ export default function LPDashboardPage() {
   // Fund total called (derive from LP share)
   const fundTotalCalled = share > 0 ? capitalCalled / share : 0;
 
-  // ── Fix #1: Admin fee = management_fee% × fund_life × called capital ──
-  // management_fee is stored as a percentage integer (e.g. 1 = 1%/yr)
-  // fund_life is in years (e.g. 10). Together: 1% × 10yr = 10% of called capital.
+  // ── Admin fee = management_fee% × fund_life × called capital ──
   const managementFeeRate = (fund.management_fee ?? 1) / 100;
   const fundLifeYears     = fund.fund_life ?? 10;
   const managementFees    = view === 'my-share'
     ? managementFeeRate * fundLifeYears * capitalCalled
     : managementFeeRate * fundLifeYears * fundTotalCalled;
 
-  // ── Fix #2: Net invested = called − admin fee ──
+  // ── Net invested = called − admin fee ──
   const netInvested = view === 'my-share'
     ? capitalCalled - managementFees
     : fundTotalCalled - managementFees;
 
-  // ── Unrealised gain — use valuations table per-transaction then per-company ──
-  // Latest valuation per company (company-level fallback)
-  const latestValByCompany: Record<string, number> = {};
+  // ── Per-transaction + per-company valuation maps (mirrors GP portal exactly) ──
+  const latestValByTxn: Record<string, Valuation> = {};
   valuations.forEach(v => {
-    if (!latestValByCompany[v.company_id] ||
-        v.quarter_end > (valuations.find(x => x.company_id === v.company_id && latestValByCompany[v.company_id] === x.value)?.quarter_end ?? '')) {
-      latestValByCompany[v.company_id] = v.value;
-    }
+    if (!v.transaction_id) return;
+    const ex = latestValByTxn[v.transaction_id];
+    if (!ex || v.quarter_end > ex.quarter_end) latestValByTxn[v.transaction_id] = v;
+  });
+  const latestValByCompany: Record<string, Valuation> = {};
+  valuations.forEach(v => {
+    if (!v.company_id) return;
+    const ex = latestValByCompany[v.company_id];
+    if (!ex || v.quarter_end > ex.quarter_end) latestValByCompany[v.company_id] = v;
+  });
+  const investCountByCo: Record<string, number> = {};
+  fundTxns.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+    investCountByCo[t.company_id] = (investCountByCo[t.company_id] ?? 0) + 1;
+  });
+  const coStatusMap: Record<string, string> = {};
+  companies.forEach(c => { coStatusMap[c.id] = (c as any).status ?? 'Active'; });
+
+  // Distribution amounts by company (for realized calc)
+  const distribByCo: Record<string, number> = {};
+  fundTxns.filter(t => t.type === 'Distribution' && t.company_id).forEach(t => {
+    distribByCo[t.company_id] = (distribByCo[t.company_id] ?? 0) + t.amount;
   });
 
-  // Fund-level portfolio value from valuations; fallback to invested at cost
-  const fundPortfolioValue = companies.reduce((s, c) => {
-    const latestVal = latestValByCompany[c.id];
-    return s + (latestVal ?? c.invested ?? 0);
-  }, 0);
-  const fundInvested   = companies.reduce((s, c) => s + (c.invested ?? 0), 0);
-  const fundUnrealised = fundPortfolioValue - fundInvested;
+  // ── Realized Gain/Loss (Exited + Written Off positions) ──
+  let realizedCost = 0;
+  let realizedProceeds = 0;
+  fundTxns.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+    const status = coStatusMap[t.company_id];
+    if (status === 'Exited' || status === 'Written Off') {
+      realizedCost     += t.amount;
+      realizedProceeds += distribByCo[t.company_id] ?? 0;
+    }
+  });
+  const fundRealizedGL = realizedProceeds - realizedCost;
 
-  // ── Fix #4: Unrealised gain = fund unrealised × LP share ──
-  const myPortfolioValue = fundPortfolioValue * share;
-  const myUnrealised     = fundUnrealised * share;
+  // ── Unrealized Gain/Loss (Active positions only) ──
+  let fundUnrealisedCost = 0;
+  let fundUnrealisedCurrentVal = 0;
+  fundTxns.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+    const status = coStatusMap[t.company_id];
+    if (status === 'Exited' || status === 'Written Off') return; // skip realized
+    const txnVal = latestValByTxn[t.id];
+    const coVal  = latestValByCompany[t.company_id];
+    let currentVal: number;
+    if (txnVal?.value != null) {
+      currentVal = txnVal.value;
+    } else if (coVal?.value != null) {
+      if (investCountByCo[t.company_id] === 1) {
+        currentVal = coVal.value;
+      } else {
+        const entryVal = t.valuation_cap ?? null;
+        const companyValue = (coVal as any).company_value ?? 0;
+        currentVal = (entryVal && entryVal > 0 && companyValue > 0)
+          ? (t.amount / entryVal) * companyValue
+          : t.amount;
+      }
+    } else {
+      currentVal = t.amount; // cost basis fallback
+    }
+    fundUnrealisedCost        += t.amount;
+    fundUnrealisedCurrentVal  += currentVal;
+  });
+  const fundUnrealisedGL  = fundUnrealisedCurrentVal - fundUnrealisedCost;
 
-  const portfolioValue = view === 'my-share' ? myPortfolioValue : fundPortfolioValue;
-  const unrealisedGL   = view === 'my-share' ? myUnrealised     : fundUnrealised;
+  // ── Net Unrealized = Unrealized + Realized (matches GP portal exactly) ──
+  const fundNetUnrealisedGL = fundUnrealisedGL + fundRealizedGL;
 
-  // ── Fix #3: Capital deployed = fund total invested × LP share ──
+  // ── Portfolio value (active NAV) and fund invested ──
+  const fundPortfolioValue = fundUnrealisedCurrentVal;
+  const fundInvested       = fundUnrealisedCost + realizedCost; // total invested incl. written-off/exited
+
+  // ── LP share values ──
+  const myPortfolioValue  = fundPortfolioValue * share;
+  const myUnrealised      = fundUnrealisedGL * share;
+  const myNetUnrealised   = fundNetUnrealisedGL * share;
+
+  const portfolioValue = view === 'my-share' ? myPortfolioValue   : fundPortfolioValue;
+  const unrealisedGL   = view === 'my-share' ? myUnrealised        : fundUnrealisedGL;
+  const netUnrealisedGL = view === 'my-share' ? myNetUnrealised    : fundNetUnrealisedGL;
+  const realisedGL     = view === 'my-share' ? fundRealizedGL * share : fundRealizedGL;
+
+  // ── Capital deployed = active invested × LP share ──
   const deployed = view === 'my-share'
-    ? fundInvested * share
-    : fundInvested;
+    ? fundUnrealisedCost * share   // only active (excludes written-off/exited cost basis)
+    : fundUnrealisedCost;
 
   // Undeployed cash
   const totalCalled    = view === 'my-share' ? capitalCalled : fundTotalCalled;
   const undeployedCash = Math.max(0, totalCalled - deployed - managementFees);
 
-  // Net gain
-  const realisedGL  = 0;
-  const netGain     = unrealisedGL + realisedGL - managementFees - undeployedCash;
-  const netGainPct  = commitment > 0 ? (netGain / commitment * 100).toFixed(1) : '0.0';
+  // Net gain (using net unrealized = the GP-portal-matching figure)
+  const netGain    = netUnrealisedGL - managementFees - undeployedCash;
+  const netGainPct = totalCalled > 0 ? (netGain / totalCalled * 100).toFixed(1) : '0.0';
 
-  // MOIC & IRR
+  // Total value = portfolio NAV + distributions received
+  const fundDistribs = Object.values(distribByCo).reduce((s, v) => s + v, 0);
   const totalIn    = view === 'my-share' ? capitalCalled : fundTotalCalled;
-  const totalValue = portfolioValue + (view === 'my-share' ? distributions : distributions / (share || 1));
+  const distribs   = view === 'my-share' ? distributions : fundDistribs;
+  const totalValue = portfolioValue + distribs;
   const netMOIC    = totalIn > 0 ? totalValue / totalIn : 0;
   const grossMOIC  = netInvested > 0 ? totalValue / netInvested : 0;
 
-  // ── Fix #5: Portfolio value % gain ──
-  const portfolioPctGain = fundInvested > 0
-    ? ((portfolioValue - (view === 'my-share' ? fundInvested * share : fundInvested)) / (view === 'my-share' ? fundInvested * share : fundInvested) * 100)
+  // Portfolio % gain (vs active cost basis only)
+  const activeCostBasis = view === 'my-share' ? fundUnrealisedCost * share : fundUnrealisedCost;
+  const portfolioPctGain = activeCostBasis > 0
+    ? ((portfolioValue - activeCostBasis) / activeCostBasis * 100)
     : 0;
 
-  // ── Fix #6: Chart data — sort ascending so chart goes up over time ──
-  const latestByCompanyByQuarter: Record<string, Record<string, number>> = {};
-  const latestDateByCompanyByQuarter: Record<string, Record<string, string>> = {};
+  // ── Chart: sort by quarter_end date ascending ──
+  const quarterEndDate: Record<string, string> = {};
   valuations.forEach(v => {
-    if (!latestByCompanyByQuarter[v.quarter]) {
-      latestByCompanyByQuarter[v.quarter] = {};
-      latestDateByCompanyByQuarter[v.quarter] = {};
-    }
-    const existingDate = latestDateByCompanyByQuarter[v.quarter][v.company_id] ?? '';
-    if (!latestByCompanyByQuarter[v.quarter][v.company_id] || v.quarter_end > existingDate) {
-      latestByCompanyByQuarter[v.quarter][v.company_id] = v.value;
-      latestDateByCompanyByQuarter[v.quarter][v.company_id] = v.quarter_end;
-    }
+    if (!quarterEndDate[v.quarter] || v.quarter_end > quarterEndDate[v.quarter])
+      quarterEndDate[v.quarter] = v.quarter_end;
   });
-  // Also include current portfolio value for the most recent quarter if no valuation exists
-  const chartData = Object.entries(latestByCompanyByQuarter)
-    .sort(([a], [b]) => a.localeCompare(b))  // ascending: oldest → newest (left → right)
-    .map(([quarter, vals]) => ({
-      quarter,
-      value: Object.values(vals).reduce((s, v) => s + v, 0) * (view === 'my-share' ? share : 1),
-    }));
+  const quarters = [...new Set(valuations.map(v => v.quarter))];
+  const chartData = quarters
+    .sort((a, b) => (quarterEndDate[a] ?? '').localeCompare(quarterEndDate[b] ?? ''))
+    .map(quarter => {
+      const latestPerCo: Record<string, number> = {};
+      valuations.filter(v => v.quarter === quarter).forEach(v => { latestPerCo[v.company_id] = v.value; });
+      const total = Object.values(latestPerCo).reduce((s, v) => s + v, 0);
+      return { quarter, value: total * (view === 'my-share' ? share : 1) };
+    })
+    .filter(d => d.value > 0);
 
   const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
@@ -501,7 +555,7 @@ export default function LPDashboardPage() {
             <span className="text-[12px] text-[#9b9890]">How Unrealised Gain reconciles to Net Gain</span>
           </div>
           <BridgeRow label="Unrealised Capital Gain" value={fmt(Math.max(0, unrealisedGL))} />
-          {realisedGL < 0 && <BridgeRow label="Less: Realised Loss" value={`(${fmt(Math.abs(realisedGL))})`} color="text-red-500" />}
+          <BridgeRow label="Less: Realised Loss" value={`(${fmt(Math.abs(realisedGL))})`} color="text-red-500" />
           <BridgeRow label="Less: Admin Fee" value={`(${fmt(managementFees)})`} />
           <BridgeRow label="Less: Undeployed Cash" value={`(${fmt(Math.max(0, undeployedCash))})`} />
           <div className="mt-2 pt-2 border-t-2 border-[#1a1915]">
@@ -526,7 +580,7 @@ export default function LPDashboardPage() {
           <StatCard label="Capital Deployed" value={fmt(deployed)} sub="Net Invested – Cash" />
         </div>
         <div className="grid grid-cols-3 gap-3 mb-5">
-          <StatCard label="Unrealised Gain / Loss" value={fmt(unrealisedGL)} sub="Fair value – cost" color={unrealisedGL >= 0 ? 'text-green-600' : 'text-red-500'} />
+          <StatCard label="Unrealised Gain / Loss" value={fmt(netUnrealisedGL)} sub="Net unrealised (incl. write-offs & exits)" color={netUnrealisedGL >= 0 ? 'text-green-600' : 'text-red-500'} />
           <StatCard label="Distributions" value={fmt(view === 'my-share' ? distributions : distributions / (share || 1))} sub="Cash received" />
           <StatCard label="Portfolio Value" value={`${fmt(portfolioValue)} (${portfolioPctGain >= 0 ? '+' : ''}${portfolioPctGain.toFixed(1)}%)`} sub="NAV · invested at cost if no valuation" color="text-[#2d5be3]" />
         </div>
