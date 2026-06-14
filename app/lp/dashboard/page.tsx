@@ -169,12 +169,6 @@ export default function LPDashboardPage() {
       setOpeningDocId(null);
     }
   }
-
-  function closeDocViewer() {
-    if (docViewerUrl) URL.revokeObjectURL(docViewerUrl);
-    setDocViewerUrl(null);
-    setDocViewerName('');
-  }
   // null = still loading, true = no LP record linked yet
   const [pendingSetup, setPendingSetup] = useState(false);
 
