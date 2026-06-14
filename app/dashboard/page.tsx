@@ -83,19 +83,25 @@ export default function DashboardPage() {
   // ── Derived KPIs ────────────────────────────────────────────
   const kpis = useMemo(() => {
     const invested      = txns.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
-    const distributions = txns.filter(t => t.type === 'Distribution').reduce((s, t) => s + t.amount, 0);
+
+    // Distributions = LP payouts only (not exit proceeds which go back into fund)
+    // Use lps table as source of truth for what was actually paid to LPs
+    const distributions = lps.reduce((s, lp) => s + (lp.distributions ?? 0), 0);
 
     // Committed + called from live LP data (source of truth)
     const committed = lps.reduce((s, lp) => s + lp.commitment, 0);
     const called    = lps.reduce((s, lp) => s + lp.called, 0);
     const uncalled  = Math.max(0, committed - called);
 
+    // Company status map — needed to exclude Exited/Written Off from active NAV
+    const coStatusMap: Record<string, string> = {};
+    companies.forEach(c => { coStatusMap[c.id] = (c as any).status ?? 'Active'; });
+
     // Portfolio value: latest valuation per company by quarter_end, then created_at
     const latestByCompany = valuations.reduce<Record<string, DbValuation>>((acc, v) => {
       if (!v.company_id) return acc;
       const existing = acc[v.company_id];
       if (!existing) { acc[v.company_id] = v; return acc; }
-      // Compare quarter_end dates; use created_at as tiebreaker
       const vDate  = v.quarter_end   || v.created_at || '';
       const exDate = existing.quarter_end || existing.created_at || '';
       if (vDate > exDate) acc[v.company_id] = v;
@@ -112,19 +118,22 @@ export default function DashboardPage() {
       const exDate = existing.quarter_end || existing.created_at || '';
       if (vDate > exDate) latestValByTxn[txnId] = v;
     });
-    // Portfolio value: sum current value across EVERY investment round (txn-level valuation,
-    // falling back to company-level valuation, then cost basis)
     const investCountByCo: Record<string, number> = {};
     txns.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
       investCountByCo[t.company_id!] = (investCountByCo[t.company_id!] ?? 0) + 1;
     });
-    const portfolioValue = txns.filter(t => t.type === 'Investment').reduce((sum, t) => {
+
+    // Portfolio value: active positions only (exclude Exited/Written Off — position closed, value = $0)
+    const portfolioValue = txns.filter(t => t.type === 'Investment' && t.company_id).reduce((sum, t) => {
+      // Skip exited/written-off — they contribute $0 to active NAV
+      const status = coStatusMap[t.company_id!];
+      if (status === 'Exited' || status === 'Written Off') return sum;
+
       const txnVal = latestValByTxn[t.id];
       if (txnVal != null && txnVal.value != null) return sum + txnVal.value;
       const co = companies.find(c => c.id === t.company_id);
       const coVal = t.company_id ? latestByCompany[t.company_id] : null;
       if (coVal != null && coVal.value != null) {
-        // Single-investment company: company-level valuation's `value` is the position value directly.
         if (t.company_id && investCountByCo[t.company_id] === 1) return sum + coVal.value;
         const entryVal = t.valuation_cap ?? null;
         if (entryVal && entryVal > 0) {
@@ -136,6 +145,7 @@ export default function DashboardPage() {
       return sum + t.amount;
     }, 0);
 
+    // Total value = active NAV + LP distributions (exit proceeds excluded — reinvested in fund)
     const totalValue = portfolioValue + distributions;
     const moic = invested > 0 ? totalValue / invested : 0;
     const dpi  = invested > 0 ? distributions / invested : 0;
