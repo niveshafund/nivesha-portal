@@ -124,7 +124,8 @@ export default function AuditLogPage() {
 
     if (actionFilter) q = q.eq('action', actionFilter);
     if (search.trim()) {
-      q = q.or(`actor_email.ilike.%${search.trim()}%,target_email.ilike.%${search.trim()}%`);
+      const safeTerm = `%${search.trim().replace(/[,()]/g, '')}%`;
+      q = q.or(`actor_email.ilike.${safeTerm},target_email.ilike.${safeTerm}`);
     }
 
     const { data, count, error } = await q;

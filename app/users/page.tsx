@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import { can, ALL_ROLES, ROLE_META, AppRole } from '@/lib/rbac';
+import { useRouter } from 'next/navigation';
 
 type TeamMember = {
   id: string;
@@ -133,6 +134,7 @@ function ActionsMenu({
 export default function UsersPage() {
   const { role: rawRole, user } = useAuth();
   const role = rawRole ?? undefined;
+  const router = useRouter();
   const [members, setMembers]         = useState<TeamMember[]>([]);
   const [lpMembers, setLpMembers]     = useState<TeamMember[]>([]);
   const [invites, setInvites]         = useState<PendingInvite[]>([]);
@@ -149,6 +151,10 @@ export default function UsersPage() {
   const [confirmDelete, setConfirmDelete] = useState<TeamMember | null>(null);
 
   useEffect(() => { loadData(); }, []);
+
+  useEffect(() => {
+    if (role && role !== 'GP') router.replace('/dashboard');
+  }, [role, router]);
 
   async function loadData() {
     setLoading(true);
@@ -556,7 +562,7 @@ export default function UsersPage() {
                   <label className="block text-[11.5px] font-medium mb-1">Role</label>
                   <select value={editRole} onChange={e => setEditRole(e.target.value as AppRole)}
                     className={inputCls}>
-                    {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                    {ALL_ROLES.filter(r => r !== 'GP' && r !== 'LP').map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                   <p className="text-[11px] text-[#9b9890] mt-1">{ROLE_META[editRole].description}</p>
                 </div>
