@@ -757,9 +757,12 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
             : 0;
           // Only prorate ownership if a real valuation entry exists.
           // Without a valuation, current value = invested amount (1.00x cost basis).
+          // Exited/Written Off positions: current value = 0 (closed position).
+          // Distributions column already captures any proceeds received.
+          const isExitedOrWrittenOff = co?.status === 'Exited' || co?.status === 'Written Off';
           const currentInvValue = (() => {
+            if (isExitedOrWrittenOff) return 0; // position closed — value is $0
             if (hasRealValuation) {
-              // Transaction-level valuation: use directly (including 0 for write-offs)
               return latestVal!.value;
             }
             if (entryVal && entryVal > 0 && currentCoVal > 0) {
@@ -770,11 +773,20 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
             return t.amount;
           })();
           const distribAmt = distribByCompany[t.company_id!] ?? 0;
-          const moic = currentInvValue != null && t.amount > 0 ? currentInvValue / t.amount : null;
+          // For exited/written-off: MOIC = proceeds / invested; for active: current value / invested
+          const moic = t.amount > 0
+            ? isExitedOrWrittenOff
+              ? distribAmt / t.amount
+              : currentInvValue / t.amount
+            : null;
           const dpi = t.amount > 0 && distribAmt > 0 ? distribAmt / t.amount : null;
           const investDate = t.date ? new Date(t.date) : null;
           const years = investDate ? (new Date().getTime() - investDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25) : 0;
-          const irr = years > 0.01 && t.amount > 0 && hasRealValuation ? (currentInvValue === 0 ? -100 : ((currentInvValue / t.amount) ** (1 / years) - 1) * 100) : null;
+          const irr = years > 0.01 && t.amount > 0
+            ? isExitedOrWrittenOff
+              ? (distribAmt === 0 ? -100 : ((distribAmt / t.amount) ** (1 / years) - 1) * 100)
+              : hasRealValuation ? (currentInvValue === 0 ? -100 : ((currentInvValue / t.amount) ** (1 / years) - 1) * 100) : null
+            : null;
           return { t, co, entryVal, currentInvValue, currentCoVal, distribAmt, moic, dpi, irr };
         });
         const totalInvestedP = rows.reduce((s, r) => s + r.t.amount, 0);
