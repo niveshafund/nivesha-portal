@@ -150,6 +150,22 @@ export default function LPDashboardPage() {
   const [tab, setTab]             = useState<'performance' | 'documents'>('performance');
   const [documents, setDocuments] = useState<LPDoc[]>([]);
   const [user, setUser]         = useState<any>(null);
+  const [openingDocId, setOpeningDocId] = useState<string | null>(null);
+
+  async function openDoc(doc: LPDoc) {
+    setOpeningDocId(doc.id);
+    try {
+      const { data, error } = await supabase.storage
+        .from('lp-documents')
+        .createSignedUrl(doc.file_path, 300); // 5 min expiry
+      if (error || !data?.signedUrl) throw error ?? new Error('No URL');
+      window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      console.error('[openDoc]', e);
+    } finally {
+      setOpeningDocId(null);
+    }
+  }
   // null = still loading, true = no LP record linked yet
   const [pendingSetup, setPendingSetup] = useState(false);
 
@@ -559,15 +575,24 @@ export default function LPDashboardPage() {
                             {' · '}{new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                           </div>
                         </div>
-                        <a href={doc.file_path} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] border border-[#e8e6df] text-[12px] font-medium text-[#2d5be3] hover:bg-[#eef2fd] transition-colors flex-shrink-0">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="7 10 12 15 17 10"/>
-                            <line x1="12" y1="15" x2="12" y2="3"/>
-                          </svg>
-                          Download
-                        </a>
+                        <button
+                          onClick={() => openDoc(doc)}
+                          disabled={openingDocId === doc.id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] border border-[#e8e6df] text-[12px] font-medium text-[#2d5be3] hover:bg-[#eef2fd] transition-colors flex-shrink-0 disabled:opacity-50">
+                          {openingDocId === doc.id ? (
+                            <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                            </svg>
+                          ) : (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                              <polyline points="15 3 21 3 21 9"/>
+                              <line x1="10" y1="14" x2="21" y2="3"/>
+                            </svg>
+                          )}
+                          {openingDocId === doc.id ? 'Opening…' : 'View'}
+                        </button>
                       </div>
                     ))}
                   </div>
