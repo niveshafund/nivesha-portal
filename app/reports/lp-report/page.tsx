@@ -1,7 +1,7 @@
 'use client';
 // app/reports/lp-report/page.tsx
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import {
   getFunds, getLPsByFund, getCompaniesByFund, getTransactionsByFund,
@@ -184,6 +184,7 @@ export default function LPReportPage() {
   const [lpTxns, setLpTxns]         = useState<DbLPTransaction[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [page, setPage]             = useState(1);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   // Load funds
   useEffect(() => {
@@ -350,8 +351,11 @@ export default function LPReportPage() {
   async function handleSave() {
     if (!fundId || !reportName.trim()) return;
     setSaving(true);
+    setSaveMsg('');
     try {
       const now = new Date().toISOString();
+
+      // 1. Save report metadata (existing behaviour)
       const { error } = await supabase.from('reports').insert({
         type: 'lp_report',
         name: reportName.trim(),
@@ -364,8 +368,58 @@ export default function LPReportPage() {
         created_at: now,
       });
       if (error) throw error;
-      setSaveMsg('Report saved!');
-      setTimeout(() => setSaveMsg(''), 2500);
+
+      // 2. Upload HTML snapshot to LP documents (for each selected LP)
+      const targetLPs = lpId === 'all' ? lps : lps.filter(l => l.id === lpId);
+      if (targetLPs.length > 0 && reportRef.current) {
+        const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>${reportName.trim()}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; color: #1a1915; margin: 0; padding: 24px; background: #f9f8f5; }
+    * { box-sizing: border-box; }
+    .bg-white { background: #fff; } .rounded-xl { border-radius: 12px; } .border { border: 1px solid #e8e6df; } .p-6 { padding: 24px; } .mb-4 { margin-bottom: 16px; } .mb-2 { margin-bottom: 8px; }
+    table { width: 100%; border-collapse: collapse; } th, td { padding: 8px 16px; border-bottom: 1px solid #e8e6df; text-align: left; font-size: 12.5px; }
+    th { font-size: 11px; color: #9b9890; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+  </style>
+</head>
+<body>
+${reportRef.current.innerHTML}
+</body>
+</html>`;
+        const blob = new Blob([htmlContent], { type: 'text/html' });
+        const fileName = `${reportName.trim().replace(/[^a-zA-Z0-9-_ ]/g, '')}.html`;
+
+        for (const lp of targetLPs) {
+          const filePath = `${lp.id}/${Date.now()}-${fileName}`;
+          const { error: uploadErr } = await supabase.storage
+            .from('lp-documents')
+            .upload(filePath, blob, { contentType: 'text/html', upsert: false });
+          if (uploadErr) { console.warn(`[save-report] storage upload failed for ${lp.name}:`, uploadErr.message); continue; }
+
+          // Insert lp_documents row so it appears in LP's Documents tab
+          await supabase.from('lp_documents').insert({
+            lp_id:       lp.id,
+            fund_id:     fundId,
+            name:        reportName.trim(),
+            file_path:   filePath,
+            file_size:   blob.size,
+            file_type:   'text/html',
+            doc_type:    'Quarterly Report',
+            notes:       `${quarterLabel(quarter)} LP Report`,
+            uploaded_by: 'GP',
+            created_at:  now,
+          });
+        }
+      }
+
+      const lpCount = targetLPs.length;
+      setSaveMsg(lpCount > 0
+        ? `Report saved & sent to ${lpCount === 1 ? targetLPs[0].name : `${lpCount} LPs`}'s documents ✓`
+        : 'Report saved!');
+      setTimeout(() => setSaveMsg(''), 4000);
     } catch (e: any) {
       setSaveMsg('Failed to save');
       console.error(e);
@@ -568,7 +622,7 @@ export default function LPReportPage() {
             <div className="w-5 h-5 border-2 border-[#2d5be3] border-t-transparent rounded-full animate-spin" />
           </div>
         ) : !fundId ? null : (
-          <>
+          <div ref={reportRef}>
             {/* ── Report Header ── */}
             <div className="bg-white border border-[#e8e6df] rounded-xl p-6">
               <div className="text-[20px] font-bold text-[#1a1915] mb-2">LP Report</div>
@@ -817,7 +871,7 @@ export default function LPReportPage() {
                 )}
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>
