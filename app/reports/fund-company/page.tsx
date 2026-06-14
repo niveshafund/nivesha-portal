@@ -122,9 +122,10 @@ function calcFundMetrics(
 
   const portfolioValue  = unrealisedCurrentVal;
   const invested        = unrealisedCost + realizedCost;
-  const distributions   = Object.values(distribByCo).reduce((s, v) => s + v, 0);
+  // Distributions = LP payouts only (exit proceeds reinvested into fund, not paid to LPs)
+  const distributions   = lps.reduce((s, lp) => s + (lp.distributions ?? 0), 0);
   const totalValue      = portfolioValue + distributions;
-  const moic            = invested > 0 ? totalValue / invested : 1;
+  const moic            = invested > 0 ? portfolioValue / invested : 1; // NAV only
   const dpi             = invested > 0 ? distributions / invested : 0;
   const realizedGL      = realizedProceeds - realizedCost;
   const unrealisedGL    = unrealisedCurrentVal - unrealisedCost;
@@ -517,28 +518,34 @@ export default function FundCompanyPage() {
       const distributed = txns.filter(t => t.company_id === co.id && t.type === 'Distribution' && new Date(t.date) <= cutoff)
         .reduce((s, t) => s + t.amount, 0);
 
+      const isExited = coStatusMap[co.id] === 'Exited' || coStatusMap[co.id] === 'Written Off';
       let currentValue = 0;
-      coTxns.forEach(t => {
-        const txnVal = latestValByTxn[t.id];
-        const coVal  = latestValByCo[co.id];
-        if (txnVal?.value != null) {
-          currentValue += txnVal.value;
-        } else if (coVal?.value != null) {
-          if (investCountByCo[co.id] === 1) {
-            currentValue += coVal.value;
+      if (!isExited) {
+        coTxns.forEach(t => {
+          const txnVal = latestValByTxn[t.id];
+          const coVal  = latestValByCo[co.id];
+          if (txnVal?.value != null) {
+            currentValue += txnVal.value;
+          } else if (coVal?.value != null) {
+            if (investCountByCo[co.id] === 1) {
+              currentValue += coVal.value;
+            } else {
+              const entryVal = (t as any).valuation_cap ?? null;
+              const companyValue = (coVal as any).company_value ?? 0;
+              currentValue += (entryVal && entryVal > 0 && companyValue > 0)
+                ? (t.amount / entryVal) * companyValue : t.amount;
+            }
           } else {
-            const entryVal = (t as any).valuation_cap ?? null;
-            const companyValue = (coVal as any).company_value ?? 0;
-            currentValue += (entryVal && entryVal > 0 && companyValue > 0)
-              ? (t.amount / entryVal) * companyValue : t.amount;
+            currentValue += t.amount;
           }
-        } else {
-          currentValue += t.amount;
-        }
-      });
+        });
+      }
 
       const totalValue = currentValue + distributed;
-      const moic = invested > 0 ? totalValue / invested : 1;
+      // MOIC: for active use current value; for exited use distributions received
+      const moic = invested > 0
+        ? isExited ? distributed / invested : currentValue / invested
+        : 1;
       const cfs: { date: Date; amount: number }[] = [];
       coTxns.sort((a, b) => a.date.localeCompare(b.date)).forEach(t =>
         cfs.push({ date: new Date(t.date), amount: -t.amount }));
