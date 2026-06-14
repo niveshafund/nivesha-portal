@@ -143,6 +143,8 @@ export default function LPDashboardPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [valuations, setValuations] = useState<Valuation[]>([]);
   const [fundTxns, setFundTxns]     = useState<any[]>([]);
+  const [showUserMenu, setShowUserMenu]           = useState(false);
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [loading, setLoading]   = useState(true);
   const [view, setView]           = useState<'my-share' | 'fund-total'>('my-share');
   const [tab, setTab]             = useState<'performance' | 'documents'>('performance');
@@ -419,19 +421,73 @@ export default function LPDashboardPage() {
           <div className="ml-auto flex items-center gap-3">
             <div className="text-[11.5px] text-[#9b9890]">Data as at {today}</div>
             {/* User menu */}
-            <button onClick={handleSignOut}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-[8px] border border-[#eaeaea] bg-white hover:bg-[#f5f4f0] transition-colors text-[12.5px]">
-              <div className="w-6 h-6 rounded-full bg-[#2d5be3] flex items-center justify-center text-white text-[10px] font-bold">
-                {lp.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
-              </div>
-              {lp.name.split(' ')[0]}
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3 text-[#9b9890]">
-                <polyline points="6 9 12 15 18 9"/>
-              </svg>
-            </button>
+            <div className="relative">
+              <button onClick={() => setShowUserMenu(v => !v)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-[8px] border border-[#eaeaea] bg-white hover:bg-[#f5f4f0] transition-colors text-[12.5px]">
+                <div className="w-6 h-6 rounded-full bg-[#2d5be3] flex items-center justify-center text-white text-[10px] font-bold">
+                  {lp.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
+                </div>
+                {lp.name.split(' ')[0]}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+                  className={`w-3 h-3 text-[#9b9890] transition-transform ${showUserMenu ? 'rotate-180' : ''}`}>
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </button>
+              {showUserMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowUserMenu(false)} />
+                  <div className="absolute right-0 mt-1.5 w-44 bg-white border border-[#eaeaea] rounded-xl shadow-lg z-20 overflow-hidden">
+                    <div className="px-3 py-2.5 border-b border-[#f0efe9]">
+                      <div className="text-[12px] font-medium text-[#1a1915] truncate">{lp.name}</div>
+                      <div className="text-[11px] text-[#9b9890]">Investor</div>
+                    </div>
+                    <button
+                      onClick={() => { setShowUserMenu(false); setShowSignOutConfirm(true); }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-[12.5px] text-red-500 hover:bg-red-50 transition-colors">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                        <polyline points="16 17 21 12 16 7"/>
+                        <line x1="21" y1="12" x2="9" y2="12"/>
+                      </svg>
+                      Sign out
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </header>
+
+      {/* ── Sign Out Confirmation Dialog ── */}
+      {showSignOutConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setShowSignOutConfirm(false)} />
+          <div className="relative bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm mx-4">
+            <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center mb-4">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5 text-red-500">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+            </div>
+            <div className="text-[15px] font-semibold mb-1">Sign out?</div>
+            <p className="text-[12.5px] text-[#9b9890] mb-5">
+              You'll need to sign in again to access your investor portal.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowSignOutConfirm(false)}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleSignOut}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] font-medium bg-red-500 text-white hover:bg-red-600 transition-colors">
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-6xl mx-auto px-6 py-8">
 
