@@ -58,7 +58,12 @@ export default function FundsPage() {
         const derivedCalled    = lps.reduce((s, lp) => s + lp.called, 0);
         const derivedInvested  = txns.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
         const feePaid          = txns.filter(t => t.type === 'Fee').reduce((s, t) => s + t.amount, 0);
-        const availCash        = derivedCalled - derivedInvested;
+        // Admin fee = 1%/yr × fund_life × called capital
+        const adminFee         = (fund.management_fee / 100) * (fund.fund_life ?? 10) * derivedCalled;
+        // Exit proceeds = distributions received back into the fund
+        const exitProceeds     = txns.filter(t => t.type === 'Distribution').reduce((s, t) => s + t.amount, 0);
+        // Available Cash = Called − Admin Fee − Gross Invested + Exit Proceeds
+        const availCash        = derivedCalled - adminFee - derivedInvested + exitProceeds;
 
         // Company status map
         const coStatusMap: Record<string, string> = {};
@@ -210,7 +215,7 @@ export default function FundsPage() {
                   const committed = f.derivedCommitted || f.committed;
                   const called    = f.derivedCalled    || f.called;
                   const invested  = f.derivedInvested  || f.invested;
-                  const availCash = called - invested;
+                  const availCash = f.availCash; // use pre-computed value with admin fee applied
                   return (
                     <tr key={f.id} className="hover:bg-[#f9f8f5] transition-colors cursor-pointer" onClick={() => window.location.href = `/funds/${f.id}`}>
                       {/* Fund Name — clickable */}
