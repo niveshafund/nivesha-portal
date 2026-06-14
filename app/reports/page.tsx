@@ -113,6 +113,13 @@ const TYPE_BADGE: Record<ReportType, string> = {
   fund_company:     'bg-amber-50 text-amber-700',
 };
 
+const TYPE_ROUTE: Record<ReportType, string> = {
+  fund_performance:     '/reports/fund-performance',
+  lp_report:            '/reports/lp-report',
+  portfolio_deployment: '/reports/portfolio-deployment',
+  fund_company:         '/reports/fund-company',
+};
+
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
@@ -122,6 +129,22 @@ export default function ReportsPage() {
   const [reports, setReports] = useState<SavedReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<FilterTab>('All');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function handleDelete(id: string) {
+    if (!confirm('Delete this report? This cannot be undone.')) return;
+    setDeletingId(id);
+    try {
+      const { error } = await supabase.from('reports').delete().eq('id', id);
+      if (error) throw error;
+      setReports(prev => prev.filter(r => r.id !== id));
+    } catch (e) {
+      console.error(e);
+      alert('Failed to delete report');
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -260,12 +283,29 @@ export default function ReportsPage() {
                       <td className="px-5 py-3 text-[12.5px] text-[#6b6860]">{r.quarter}</td>
                       <td className="px-5 py-3 text-[12.5px] text-[#9b9890]">{fmtDate(r.generated_at)}</td>
                       <td className="px-5 py-3">
-                        <Link
-                          href={`/reports/fund-performance?reportId=${r.id}`}
-                          className="text-[12px] text-[#2d5be3] hover:underline font-medium"
-                        >
-                          View →
-                        </Link>
+                        <div className="flex items-center gap-3">
+                          <Link
+                            href={`${TYPE_ROUTE[r.type]}?reportId=${r.id}`}
+                            className="text-[12px] text-[#2d5be3] hover:underline font-medium whitespace-nowrap"
+                          >
+                            View →
+                          </Link>
+                          <button
+                            onClick={() => handleDelete(r.id)}
+                            disabled={deletingId === r.id}
+                            className="text-[12px] text-red-400 hover:text-red-600 transition-colors disabled:opacity-40"
+                            title="Delete report"
+                          >
+                            {deletingId === r.id ? '…' : (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6l-1 14H6L5 6"/>
+                                <path d="M10 11v6"/><path d="M14 11v6"/>
+                                <path d="M9 6V4h6v2"/>
+                              </svg>
+                            )}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
