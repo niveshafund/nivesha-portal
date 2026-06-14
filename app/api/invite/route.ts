@@ -8,6 +8,15 @@ export async function POST(request: Request) {
   const { email, full_name, role } = await request.json();
   if (!email) return NextResponse.json({ error: 'Email required' }, { status: 400 });
 
+  // Validate role — must be a known role, and GPs cannot invite other GPs
+  const VALID_ROLES = ['LP', 'Associate', 'Analyst', 'Finance', 'LP Manager', 'Viewer'];
+  if (!role || !VALID_ROLES.includes(role)) {
+    return NextResponse.json(
+      { error: `Invalid role. Must be one of: ${VALID_ROLES.join(', ')}` },
+      { status: 400 }
+    );
+  }
+
   // Verify the caller is a GP
   const cookieStore = await cookies();
   const supabaseUser = createServerClient(

@@ -14,6 +14,10 @@ export async function GET(request: NextRequest) {
   const type       = searchParams.get('type') as EmailOtpType | null;
   const next       = searchParams.get('next');
 
+  // Sanitize next to relative paths only — prevents open redirect attacks.
+  // Reject anything that starts with http/https or // (protocol-relative URLs).
+  const safeNext = next && /^\/(?!\/)/.test(next) ? next : null;
+
   const cookieStore = await cookies();
   const response = NextResponse.redirect(new URL('/', request.url));
 
@@ -53,7 +57,7 @@ export async function GET(request: NextRequest) {
       await linkLpRecord(user.id, user.email);
     }
 
-    const destination = next ?? await resolveRoleRedirect(user.id);
+    const destination = safeNext ?? await resolveRoleRedirect(user.id);
     response.headers.set('location', new URL(destination, request.url).toString());
     return response;
   }
@@ -74,7 +78,7 @@ export async function GET(request: NextRequest) {
     await linkLpRecord(user.id, user.email);
   }
 
-  const destination = next ?? await resolveRoleRedirect(user.id);
+  const destination = safeNext ?? await resolveRoleRedirect(user.id);
   response.headers.set('location', new URL(destination, request.url).toString());
   return response;
 }
