@@ -41,14 +41,22 @@ function currentQuarter(): string {
 }
 
 // ── IRR calc (CAGR proxy) ─────────────────────────────────────
-function calcIRR(invested: number, totalValue: number, firstDate: string | null): number {
-  if (!firstDate || invested <= 0 || totalValue <= 0) return 0;
-  const years = (Date.now() - new Date(firstDate).getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-  if (years < 0.1) return 0;
-  return ((totalValue / invested) ** (1 / years) - 1) * 100;
+function xirr(cashflows: { date: Date; amount: number }[]): number {
+  if (cashflows.length < 2) return 0;
+  const t0 = cashflows[0].date.getTime();
+  const yrs = (d: Date) => (d.getTime() - t0) / (1000 * 60 * 60 * 24 * 365.25);
+  const npv = (r: number) => cashflows.reduce((s, cf) => s + cf.amount / Math.pow(1 + r, yrs(cf.date)), 0);
+  let lo = -0.999, hi = 10, fLo = npv(lo), fHi = npv(hi);
+  if (fLo * fHi > 0) return 0;
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2, fMid = npv(mid);
+    if (Math.abs(fMid) < 1e-6) return mid * 100;
+    if ((fLo < 0) !== (fMid < 0)) { hi = mid; fHi = fMid; } else { lo = mid; fLo = fMid; }
+  }
+  return ((lo + hi) / 2) * 100;
 }
 
-// ── Fund-level metrics (as-of a cutoff date) ─────────────────
+// ── Fund-level metrics (as-of a cutoff date) — mirrors GP portal logic exactly ──
 function calcFundMetrics(
   txns: DbTransaction[],
   companies: DbCompany[],
@@ -58,36 +66,99 @@ function calcFundMetrics(
 ) {
   const cutoff = new Date(asOfDate);
   const ft = txns.filter(t => new Date(t.date) <= cutoff);
-  const invested      = ft.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
-  const distributions = ft.filter(t => t.type === 'Distribution').reduce((s, t) => s + t.amount, 0);
+
   const committed     = lps.reduce((s, lp) => s + lp.commitment, 0);
   const called        = lps.reduce((s, lp) => s + lp.called, 0);
   const uncalled      = Math.max(0, committed - called);
 
+  // Company status map
+  const coStatusMap: Record<string, string> = {};
+  companies.forEach(c => { coStatusMap[c.id] = (c as any).status ?? 'Active'; });
+
+  // Per-transaction valuation maps
   const fv = valuations.filter(v => new Date(v.quarter_end) <= cutoff);
-  const latestByCompany: Record<string, DbValuation> = {};
-  for (const v of fv) {
-    if (!v.company_id) continue;
-    const ex = latestByCompany[v.company_id];
-    if (!ex || v.quarter_end > ex.quarter_end) latestByCompany[v.company_id] = v;
-  }
-  const invByCompany: Record<string, number> = {};
-  for (const t of ft.filter(t => t.type === 'Investment')) {
-    if (t.company_id) invByCompany[t.company_id] = (invByCompany[t.company_id] ?? 0) + t.amount;
-  }
-  const portfolioValue = companies.reduce((s, co) => {
-    const lv = latestByCompany[co.id];
-    return s + (lv ? lv.value : (invByCompany[co.id] ?? 0));
-  }, 0);
-  const totalValue = portfolioValue + distributions;
-  const moic = invested > 0 ? totalValue / invested : 1;
-  const dpi  = invested > 0 ? distributions / invested : 0;
+  const latestValByTxn: Record<string, DbValuation> = {};
+  fv.forEach(v => {
+    if (!(v as any).transaction_id) return;
+    const ex = latestValByTxn[(v as any).transaction_id];
+    if (!ex || v.quarter_end > ex.quarter_end) latestValByTxn[(v as any).transaction_id] = v;
+  });
+  const latestValByCo: Record<string, DbValuation> = {};
+  fv.forEach(v => {
+    if (!v.company_id) return;
+    const ex = latestValByCo[v.company_id];
+    if (!ex || v.quarter_end > ex.quarter_end) latestValByCo[v.company_id] = v;
+  });
+  const investCountByCo: Record<string, number> = {};
+  ft.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+    investCountByCo[t.company_id!] = (investCountByCo[t.company_id!] ?? 0) + 1;
+  });
 
-  const firstInv = ft.filter(t => t.type === 'Investment')
-    .sort((a, b) => a.date.localeCompare(b.date))[0];
-  const irr = calcIRR(invested, totalValue, firstInv?.date ?? null);
+  // Distribution amounts by company
+  const distribByCo: Record<string, number> = {};
+  ft.filter(t => t.type === 'Distribution' && t.company_id).forEach(t => {
+    distribByCo[t.company_id!] = (distribByCo[t.company_id!] ?? 0) + t.amount;
+  });
 
-  return { invested, distributions, committed, called, uncalled, portfolioValue, totalValue, moic, dpi, irr };
+  // Realized: Exited + Written Off
+  let realizedCost = 0, realizedProceeds = 0;
+  ft.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+    const status = coStatusMap[t.company_id!];
+    if (status === 'Exited' || status === 'Written Off') {
+      realizedCost     += t.amount;
+      realizedProceeds += distribByCo[t.company_id!] ?? 0;
+    }
+  });
+  const realizedGL = realizedProceeds - realizedCost;
+
+  // Unrealized: Active positions only
+  let unrealisedCost = 0, unrealisedCurrentVal = 0;
+  ft.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+    const status = coStatusMap[t.company_id!];
+    if (status === 'Exited' || status === 'Written Off') return;
+    const txnVal = latestValByTxn[t.id];
+    const coVal  = latestValByCo[t.company_id!];
+    let currentVal: number;
+    if (txnVal?.value != null) {
+      currentVal = txnVal.value;
+    } else if (coVal?.value != null) {
+      if (investCountByCo[t.company_id!] === 1) {
+        currentVal = coVal.value;
+      } else {
+        const entryVal = (t as any).valuation_cap ?? null;
+        const companyValue = (coVal as any).company_value ?? 0;
+        currentVal = (entryVal && entryVal > 0 && companyValue > 0)
+          ? (t.amount / entryVal) * companyValue : t.amount;
+      }
+    } else {
+      currentVal = t.amount;
+    }
+    unrealisedCost       += t.amount;
+    unrealisedCurrentVal += currentVal;
+  });
+
+  const unrealisedGL    = unrealisedCurrentVal - unrealisedCost;
+  const netUnrealisedGL = unrealisedGL + realizedGL; // matches GP portal Net Unrealized Gain/Loss
+  const portfolioValue  = unrealisedCurrentVal;      // active NAV only
+  const invested        = unrealisedCost + realizedCost; // all invested
+  const distributions   = Object.values(distribByCo).reduce((s, v) => s + v, 0);
+  const totalValue      = portfolioValue + distributions;
+  const moic            = invested > 0 ? totalValue / invested : 1;
+  const dpi             = invested > 0 ? distributions / invested : 0;
+
+  // XIRR over all cashflows
+  const cfs: { date: Date; amount: number }[] = [];
+  ft.filter(t => t.type === 'Investment').forEach(t => cfs.push({ date: new Date(t.date), amount: -t.amount }));
+  ft.filter(t => t.type === 'Distribution').forEach(t => cfs.push({ date: new Date(t.date), amount: t.amount }));
+  if (portfolioValue > 0) cfs.push({ date: new Date(), amount: portfolioValue });
+  cfs.sort((a, b) => a.date.getTime() - b.date.getTime());
+  const irr = xirr(cfs);
+
+  return {
+    invested, distributions, committed, called, uncalled,
+    portfolioValue, totalValue, moic, dpi, irr,
+    realizedGL, unrealisedGL, netUnrealisedGL, realizedProceeds,
+  };
 }
 
 const inputCls  = 'w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 bg-white';
@@ -169,30 +240,57 @@ export default function LPReportPage() {
     const totalDistributed = selectedLPs.reduce((s, lp) => s + lp.distributions, 0);
     const ownershipPct     = selectedLPs.reduce((s, lp) => s + lp.ownership_pct, 0);
     const uncalled         = Math.max(0, totalCommitment - totalCalled);
+    const share            = ownershipPct / 100;
 
-    // LP's proportional share of fund metrics
-    const lpPortfolioValue  = fundMetrics.portfolioValue  * (ownershipPct / 100);
-    const lpTotalValue      = fundMetrics.totalValue      * (ownershipPct / 100);
-    const lpInvested        = fundMetrics.invested        * (ownershipPct / 100);
+    // LP's proportional share — use net unrealized (matches GP portal) for portfolio value
+    const lpPortfolioValue  = fundMetrics.portfolioValue  * share;
+    const lpNetUnrealisedGL = fundMetrics.netUnrealisedGL * share;
+    // Total value = active NAV + exit proceeds received (not LP distributions which are $0)
+    const lpTotalValue      = lpPortfolioValue + (fundMetrics.realizedProceeds * share);
+    const lpInvested        = fundMetrics.invested * share;
 
     const moic = lpInvested > 0 ? lpTotalValue / lpInvested : 1;
     const dpi  = lpInvested > 0 ? totalDistributed / lpInvested : 0;
 
-    // IRR from LP transactions
+    // XIRR from LP transactions
     const lpTxnsSorted = lpTxns
       .filter(t => selectedLPs.some(lp => lp.id === t.lp_id) && new Date(t.date) <= cutoff)
       .sort((a, b) => a.date.localeCompare(b.date));
-    const irr = calcIRR(totalCalled, lpTotalValue, lpTxnsSorted[0]?.date ?? null);
+    const cfs: { date: Date; amount: number }[] = [];
+    lpTxnsSorted.forEach(t => cfs.push({ date: new Date(t.date), amount: -t.amount }));
+    if (lpPortfolioValue > 0) cfs.push({ date: new Date(), amount: lpPortfolioValue });
+    const irr = xirr(cfs);
 
     return {
       totalCommitment, totalCalled, totalDistributed, ownershipPct,
-      uncalled, lpPortfolioValue, lpTotalValue, lpInvested, moic, dpi, irr,
-      vehicleCount: selectedLPs.length,
+      uncalled, lpPortfolioValue, lpTotalValue, lpInvested, lpNetUnrealisedGL,
+      moic, dpi, irr, vehicleCount: selectedLPs.length,
     };
   }, [selectedLPs, fundMetrics, lpTxns, cutoff]);
 
-  // Per-company rows (LP proportional share)
+  // Per-company rows (LP proportional share) — mirrors GP portal Portfolio tab
   const companyRows = useMemo(() => {
+    const coStatusMap: Record<string, string> = {};
+    companies.forEach(c => { coStatusMap[c.id] = (c as any).status ?? 'Active'; });
+    const fv = valuations.filter(v => new Date(v.quarter_end) <= cutoff);
+    const latestValByTxn: Record<string, DbValuation> = {};
+    fv.forEach(v => {
+      if (!(v as any).transaction_id) return;
+      const ex = latestValByTxn[(v as any).transaction_id];
+      if (!ex || v.quarter_end > ex.quarter_end) latestValByTxn[(v as any).transaction_id] = v;
+    });
+    const latestValByCo: Record<string, DbValuation> = {};
+    fv.forEach(v => {
+      if (!v.company_id) return;
+      const ex = latestValByCo[v.company_id];
+      if (!ex || v.quarter_end > ex.quarter_end) latestValByCo[v.company_id] = v;
+    });
+    const investCountByCo: Record<string, number> = {};
+    txns.filter(t => t.type === 'Investment' && t.company_id && new Date(t.date) <= cutoff)
+      .forEach(t => { investCountByCo[t.company_id!] = (investCountByCo[t.company_id!] ?? 0) + 1; });
+
+    const pct = lpMetrics.ownershipPct / 100;
+
     return companies.map(co => {
       const coTxns = txns.filter(t => t.company_id === co.id && t.type === 'Investment'
         && new Date(t.date) <= cutoff);
@@ -200,20 +298,39 @@ export default function LPReportPage() {
       const fundDistributed = txns
         .filter(t => t.company_id === co.id && t.type === 'Distribution' && new Date(t.date) <= cutoff)
         .reduce((s, t) => s + t.amount, 0);
-      const latestVal = valuations
-        .filter(v => v.company_id === co.id && new Date(v.quarter_end) <= cutoff)
-        .sort((a, b) => b.quarter_end.localeCompare(a.quarter_end))[0];
-      const fundCurrentValue = latestVal ? latestVal.value : fundInvested;
-      const fundTotalValue   = fundCurrentValue + fundDistributed;
 
-      const pct = lpMetrics.ownershipPct / 100;
-      const lpInvested      = fundInvested      * pct;
-      const lpCurrentValue  = fundCurrentValue  * pct;
-      const lpDistributed   = fundDistributed   * pct;
-      const lpTotalValue    = fundTotalValue     * pct;
+      // Per-transaction current value (same as GP portal)
+      let fundCurrentValue = 0;
+      coTxns.forEach(t => {
+        const txnVal = latestValByTxn[t.id];
+        const coVal  = latestValByCo[co.id];
+        if (txnVal?.value != null) {
+          fundCurrentValue += txnVal.value;
+        } else if (coVal?.value != null) {
+          if (investCountByCo[co.id] === 1) {
+            fundCurrentValue += coVal.value;
+          } else {
+            const entryVal = (t as any).valuation_cap ?? null;
+            const companyValue = (coVal as any).company_value ?? 0;
+            fundCurrentValue += (entryVal && entryVal > 0 && companyValue > 0)
+              ? (t.amount / entryVal) * companyValue : t.amount;
+          }
+        } else {
+          fundCurrentValue += t.amount; // cost basis fallback
+        }
+      });
+
+      const fundTotalValue = fundCurrentValue + fundDistributed;
+      const lpInvested     = fundInvested     * pct;
+      const lpCurrentValue = fundCurrentValue * pct;
+      const lpDistributed  = fundDistributed  * pct;
+      const lpTotalValue   = fundTotalValue   * pct;
       const moic = lpInvested > 0 ? lpTotalValue / lpInvested : 1;
-      const firstDate = coTxns.sort((a, b) => a.date.localeCompare(b.date))[0]?.date ?? null;
-      const irr = calcIRR(lpInvested, lpTotalValue, firstDate);
+      const cfs: { date: Date; amount: number }[] = [];
+      coTxns.sort((a, b) => a.date.localeCompare(b.date)).forEach(t =>
+        cfs.push({ date: new Date(t.date), amount: -(t.amount * pct) }));
+      if (lpCurrentValue > 0) cfs.push({ date: new Date(), amount: lpCurrentValue });
+      const irr = xirr(cfs);
 
       return { co, lpInvested, lpCurrentValue, lpDistributed, lpTotalValue, moic, irr };
     }).sort((a, b) => b.lpInvested - a.lpInvested);
