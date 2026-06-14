@@ -377,10 +377,29 @@ export default function LPReportPage() {
         const { jsPDF }   = await import('jspdf');
 
         const canvas = await html2canvas(reportRef.current, {
-          scale: 2,           // retina quality
+          scale: 2,
           useCORS: true,
           backgroundColor: '#f9f8f5',
           logging: false,
+          onclone: (_doc: Document, el: HTMLElement) => {
+            // Replace unsupported CSS color functions (oklch, lab, lch, oklab)
+            // that html2canvas can't parse — convert to safe hex fallbacks
+            const replaceColors = (node: HTMLElement) => {
+              const style = node.style;
+              const computed = window.getComputedStyle(node);
+              // Override color and background-color with computed RGB values
+              const color = computed.color;
+              const bg    = computed.backgroundColor;
+              if (color && !color.startsWith('oklch') && !color.startsWith('lab')) {
+                style.color = color;
+              }
+              if (bg && !bg.startsWith('oklch') && !bg.startsWith('lab')) {
+                style.backgroundColor = bg;
+              }
+              Array.from(node.children).forEach(child => replaceColors(child as HTMLElement));
+            };
+            replaceColors(el);
+          },
         });
 
         const imgWidth  = 210; // A4 width in mm
