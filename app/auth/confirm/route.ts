@@ -116,6 +116,8 @@ async function activateUser(userId: string, email: string) {
   console.log(`[confirm] Activated user ${userId}`);
 }
 
+const ALLOWED_INVITE_ROLES = ['LP', 'Associate', 'Analyst', 'Finance', 'LP Manager', 'Viewer'];
+
 async function hydrateRoleFromPendingInvite(userId: string, email: string) {
   const admin = adminClient();
   const normalizedEmail = email.trim().toLowerCase();
@@ -128,6 +130,11 @@ async function hydrateRoleFromPendingInvite(userId: string, email: string) {
 
   if (fetchErr || !invite) {
     console.warn(`[confirm] No pending invite for ${normalizedEmail} — role may already be set`);
+    return;
+  }
+
+  if (!ALLOWED_INVITE_ROLES.includes(invite.role)) {
+    console.error(`[confirm] Blocked invalid role '${invite.role}' in pending_invites for ${normalizedEmail}`);
     return;
   }
 
