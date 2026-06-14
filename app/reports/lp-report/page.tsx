@@ -428,8 +428,8 @@ export default function LPReportPage() {
         : 'Report saved!');
       setTimeout(() => setSaveMsg(''), 4000);
     } catch (e: any) {
-      setSaveMsg('Failed to save');
-      console.error(e);
+      console.error('[save-report]', e);
+      setSaveMsg(`Failed to save: ${e?.message ?? String(e)}`);
     } finally {
       setSaving(false);
     }
