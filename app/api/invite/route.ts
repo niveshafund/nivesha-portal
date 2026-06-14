@@ -84,6 +84,15 @@ export async function POST(request: Request) {
       invited_by: user.id,
     }, { onConflict: 'email' });
 
+    // Audit log
+    await supabaseAdmin.from('audit_logs').insert({
+      action:       'user_invited',
+      actor_id:     user.id,
+      actor_email:  user.email,
+      target_email: normalizedEmail,
+      details:      JSON.stringify({ role, full_name: full_name?.trim() || null, existing_user: true }),
+    });
+
     return NextResponse.json({ success: true, existing_user: true });
   }
 
@@ -101,6 +110,15 @@ export async function POST(request: Request) {
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+  // Audit log
+  await supabaseAdmin.from('audit_logs').insert({
+    action:       'user_invited',
+    actor_id:     user.id,
+    actor_email:  user.email,
+    target_email: normalizedEmail,
+    details:      JSON.stringify({ role, full_name: full_name?.trim() || null }),
+  });
 
   return NextResponse.json({ success: true });
 }

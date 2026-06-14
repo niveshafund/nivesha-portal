@@ -59,5 +59,28 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error?.message ?? 'Failed to generate link' }, { status: 400 });
   }
 
-  return NextResponse.json({ url: data.properties.action_link });
+  // Audit log — record who impersonated whom (never log the link itself)
+  await supabaseAdmin.from('audit_logs').insert({
+    action:     'impersonate',
+    actor_id:   user.id,
+    actor_email: user.email,
+    target_email: email.trim().toLowerCase(),
+    created_at: new Date().toISOString(),
+  }).then(({ error: auditErr }) => {
+    if (auditErr) console.warn('[impersonate] audit log failed:', auditErr.message);
+  });
+
+  console.log(`[impersonate] GP ${user.email} generated magic link for ${email}`);
+
+  // Return the magic link — mark response as non-cacheable and sensitive
+  // so proxies, CDNs, and Vercel edge logs don't store the response body.
+  return new NextResponse(JSON.stringify({ url: data.properties.action_link }), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+      'Pragma': 'no-cache',
+      'X-Sensitive-Response': '1', // signal to any middleware to skip body logging
+    },
+  });
 }
