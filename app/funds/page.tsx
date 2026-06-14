@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getFunds, getTransactionsByFund, getLPsByFund, getCompaniesByFund, DbFund } from '@/lib/db';
+import { getFunds, getTransactionsByFund, getLPsByFund, getCompaniesByFund, getValuationsByFund, DbFund, DbValuation } from '@/lib/db';
 
 const fmt = (n: number): string => {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}m`;
@@ -31,6 +31,9 @@ type FundWithMetrics = DbFund & {
   feePaid: number;
   companyCount: number;
   lpCount: number;
+  liveNAV: number;
+  liveMOIC: number;
+  liveIRR: number;
 };
 
 export default function FundsPage() {
@@ -45,17 +48,84 @@ export default function FundsPage() {
       setLoading(true);
       const dbFunds = await getFunds();
       const enriched = await Promise.all(dbFunds.map(async (fund) => {
-        const [lps, txns, companies] = await Promise.all([
+        const [lps, txns, companies, valuations] = await Promise.all([
           getLPsByFund(fund.id),
           getTransactionsByFund(fund.id),
           getCompaniesByFund(fund.id),
+          getValuationsByFund(fund.id),
         ]);
         const derivedCommitted = lps.reduce((s, lp) => s + lp.commitment, 0);
         const derivedCalled    = lps.reduce((s, lp) => s + lp.called, 0);
         const derivedInvested  = txns.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
         const feePaid          = txns.filter(t => t.type === 'Fee').reduce((s, t) => s + t.amount, 0);
         const availCash        = derivedCalled - derivedInvested;
-        return { ...fund, derivedCommitted, derivedCalled, derivedInvested, availCash, feePaid, companyCount: companies.length, lpCount: lps.length };
+
+        // Company status map
+        const coStatusMap: Record<string, string> = {};
+        companies.forEach(c => { coStatusMap[c.id] = (c as any).status ?? 'Active'; });
+
+        // Per-transaction + per-company valuation maps
+        const latestValByTxn: Record<string, DbValuation> = {};
+        valuations.forEach(v => {
+          if (!(v as any).transaction_id) return;
+          const ex = latestValByTxn[(v as any).transaction_id];
+          if (!ex || v.quarter_end > ex.quarter_end) latestValByTxn[(v as any).transaction_id] = v;
+        });
+        const latestValByCo: Record<string, DbValuation> = {};
+        valuations.forEach(v => {
+          if (!v.company_id) return;
+          const ex = latestValByCo[v.company_id];
+          if (!ex || v.quarter_end > ex.quarter_end) latestValByCo[v.company_id] = v;
+        });
+        const investCountByCo: Record<string, number> = {};
+        txns.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+          investCountByCo[t.company_id!] = (investCountByCo[t.company_id!] ?? 0) + 1;
+        });
+
+        // Live NAV — active positions only (exclude Exited/Written Off)
+        let liveNAV = 0;
+        txns.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+          const status = coStatusMap[t.company_id!];
+          if (status === 'Exited' || status === 'Written Off') return;
+          const txnVal = latestValByTxn[t.id];
+          const coVal  = latestValByCo[t.company_id!];
+          if (txnVal?.value != null) { liveNAV += txnVal.value; return; }
+          if (coVal?.value != null) {
+            if (investCountByCo[t.company_id!] === 1) { liveNAV += coVal.value; return; }
+            const entryVal = (t as any).valuation_cap ?? null;
+            const companyValue = (coVal as any).company_value ?? 0;
+            liveNAV += (entryVal && entryVal > 0 && companyValue > 0)
+              ? (t.amount / entryVal) * companyValue : t.amount;
+            return;
+          }
+          liveNAV += t.amount; // cost basis fallback
+        });
+
+        const liveMOIC = derivedInvested > 0 ? liveNAV / derivedInvested : 0;
+
+        // XIRR
+        const xirr = (cfs: { date: Date; amount: number }[]): number => {
+          if (cfs.length < 2) return 0;
+          const t0 = cfs[0].date.getTime();
+          const yrs = (d: Date) => (d.getTime() - t0) / (1000 * 60 * 60 * 24 * 365.25);
+          const npv = (r: number) => cfs.reduce((s, cf) => s + cf.amount / Math.pow(1 + r, yrs(cf.date)), 0);
+          let lo = -0.999, hi = 10, fLo = npv(lo), fHi = npv(hi);
+          if (fLo * fHi > 0) return 0;
+          for (let i = 0; i < 100; i++) {
+            const mid = (lo + hi) / 2, fMid = npv(mid);
+            if (Math.abs(fMid) < 1e-6) return mid * 100;
+            if ((fLo < 0) !== (fMid < 0)) { hi = mid; fHi = fMid; } else { lo = mid; fLo = fMid; }
+          }
+          return ((lo + hi) / 2) * 100;
+        };
+        const cfs: { date: Date; amount: number }[] = [];
+        txns.filter(t => t.type === 'Investment' && t.date).forEach(t => cfs.push({ date: new Date(t.date), amount: -t.amount }));
+        txns.filter(t => t.type === 'Distribution' && t.date).forEach(t => cfs.push({ date: new Date(t.date), amount: t.amount }));
+        if (liveNAV > 0) cfs.push({ date: new Date(), amount: liveNAV });
+        cfs.sort((a, b) => a.date.getTime() - b.date.getTime());
+        const liveIRR = xirr(cfs);
+
+        return { ...fund, derivedCommitted, derivedCalled, derivedInvested, availCash, feePaid, companyCount: companies.length, lpCount: lps.length, liveNAV, liveMOIC, liveIRR };
       }));
       setFunds(enriched);
     } catch (err: any) {
@@ -67,7 +137,7 @@ export default function FundsPage() {
 
   const totalCommitted = funds.reduce((s, f) => s + (f.derivedCommitted || f.committed), 0);
   const totalInvested  = funds.reduce((s, f) => s + (f.derivedInvested  || f.invested),  0);
-  const totalNAV       = funds.reduce((s, f) => s + f.nav, 0);
+  const totalNAV       = funds.reduce((s, f) => s + f.liveNAV, 0);
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -177,9 +247,9 @@ export default function FundsPage() {
                           {called > 0 ? fmt(Math.abs(availCash)) : '—'}
                         </div>
                       </td>
-                      <td className="px-3 py-3 border-b border-[#e8e6df] font-mono text-[12px]">{f.nav > 0 ? fmt(f.nav) : '—'}</td>
-                      <td className={`px-3 py-3 border-b border-[#e8e6df] text-[12.5px] ${moicColor(f.moic)}`}>{f.moic > 0 ? `${f.moic.toFixed(2)}x` : '—'}</td>
-                      <td className={`px-3 py-3 border-b border-[#e8e6df] text-[12.5px] ${irrColor(f.irr)}`}>{f.irr !== 0 ? `${f.irr.toFixed(1)}%` : '—'}</td>
+                      <td className="px-3 py-3 border-b border-[#e8e6df] font-mono text-[12px]">{f.liveNAV > 0 ? fmt(f.liveNAV) : '—'}</td>
+                      <td className={`px-3 py-3 border-b border-[#e8e6df] text-[12.5px] ${moicColor(f.liveMOIC)}`}>{f.liveMOIC > 0 ? `${f.liveMOIC.toFixed(2)}x` : '—'}</td>
+                      <td className={`px-3 py-3 border-b border-[#e8e6df] text-[12.5px] ${irrColor(f.liveIRR)}`}>{f.liveIRR !== 0 ? `${f.liveIRR.toFixed(1)}%` : '—'}</td>
                       <td className="px-3 py-3 border-b border-[#e8e6df] font-mono text-[12px] text-[#d97706]">
                         {f.feePaid > 0 ? fmt(f.feePaid) : committed > 0 ? `est. ${fmt(committed * f.management_fee / 100)}/yr` : '—'}
                       </td>
