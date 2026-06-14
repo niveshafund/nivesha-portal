@@ -154,17 +154,26 @@ export default function LPDashboardPage() {
 
   async function openDoc(doc: LPDoc) {
     setOpeningDocId(doc.id);
+    const win = window.open('', '_blank', 'noopener,noreferrer');
     try {
       const { data, error } = await supabase.storage
         .from('lp-documents')
         .createSignedUrl(doc.file_path, 300); // 5 min expiry
       if (error || !data?.signedUrl) throw error ?? new Error('No URL');
-      window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+      // PDFs render natively in browsers via signed URL
+      if (win) win.location.href = data.signedUrl;
     } catch (e) {
       console.error('[openDoc]', e);
+      if (win) win.close();
     } finally {
       setOpeningDocId(null);
     }
+  }
+
+  function closeDocViewer() {
+    if (docViewerUrl) URL.revokeObjectURL(docViewerUrl);
+    setDocViewerUrl(null);
+    setDocViewerName('');
   }
   // null = still loading, true = no LP record linked yet
   const [pendingSetup, setPendingSetup] = useState(false);
@@ -570,7 +579,7 @@ export default function LPDashboardPage() {
                         <div className="flex-1 min-w-0">
                           <div className="text-[13.5px] font-medium text-[#1a1915] truncate">{doc.name}</div>
                           <div className="text-[11.5px] text-[#9b9890] mt-0.5">
-                            {doc.file_type?.replace('application/','').toUpperCase()}
+                            {doc.file_type?.replace('application/', '').toUpperCase()}
                             {doc.file_size ? ` · ${(doc.file_size / 1024).toFixed(0)} KB` : ''}
                             {' · '}{new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                           </div>
