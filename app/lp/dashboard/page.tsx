@@ -398,10 +398,9 @@ export default function LPDashboardPage() {
   const netMOIC    = totalIn > 0 ? totalValue / totalIn : 0;
   const grossMOIC  = netInvested > 0 ? totalValue / netInvested : 0;
 
-  // Portfolio % gain (vs active cost basis only)
-  const activeCostBasis = view === 'my-share' ? fundUnrealisedCost * share : fundUnrealisedCost;
-  const portfolioPctGain = activeCostBasis > 0
-    ? ((portfolioValue - activeCostBasis) / activeCostBasis * 100)
+  // Portfolio % gain (vs total paid-in capital)
+  const portfolioPctGain = capitalCalled > 0
+    ? ((portfolioValue - capitalCalled) / capitalCalled * 100)
     : 0;
 
   // ── Chart: sort by quarter_end date ascending ──
