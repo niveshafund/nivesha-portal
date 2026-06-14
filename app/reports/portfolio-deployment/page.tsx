@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { getFunds, getCompaniesByFund, DbFund, DbCompany } from '@/lib/db';
+import { getFunds, getCompaniesByFund, getTransactionsByFund, getValuationsByFund, DbFund, DbCompany, DbTransaction, DbValuation } from '@/lib/db';
 import { supabase } from '@/lib/supabase';
 
 // ── Formatters ────────────────────────────────────────────────
@@ -54,6 +54,8 @@ export default function PortfolioDeploymentPage() {
   const [saveMsg, setSaveMsg]       = useState('');
 
   const [companies, setCompanies]   = useState<DbCompany[]>([]);
+  const [txns, setTxns]             = useState<DbTransaction[]>([]);
+  const [valuations, setValuations] = useState<DbValuation[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [page, setPage]             = useState(1);
 
@@ -71,31 +73,80 @@ export default function PortfolioDeploymentPage() {
     setReportName(`${q} - ${fundPart} - Portfolio Deployment by ${DEPLOY_VARS.find(d => d.value === deployVar)?.label}`);
   }, [fundId, deployVar, funds]);
 
-  // Load companies
+  // Load companies + transactions + valuations
   useEffect(() => {
     setLoadingData(true);
     setPage(1);
     async function load() {
       try {
-        if (fundId === 'all') {
-          // Load all funds in parallel
-          const allFunds = await getFunds();
-          const results = await Promise.all(allFunds.map(f => getCompaniesByFund(f.id)));
-          setCompanies(results.flat());
-        } else {
-          setCompanies(await getCompaniesByFund(fundId));
-        }
+        const allFunds = fundId === 'all' ? await getFunds() : funds.filter(f => f.id === fundId);
+        const results = await Promise.all(allFunds.map(f => Promise.all([
+          getCompaniesByFund(f.id),
+          getTransactionsByFund(f.id),
+          getValuationsByFund(f.id),
+        ])));
+        setCompanies(results.flatMap(r => r[0]));
+        setTxns(results.flatMap(r => r[1]));
+        setValuations(results.flatMap(r => r[2]));
       } finally {
         setLoadingData(false);
       }
     }
     load();
-  }, [fundId]);
+  }, [fundId, funds]);
+
+  // ── Live per-company metrics (mirrors GP portal logic) ────────
+  const liveMetrics = useMemo(() => {
+    const coStatusMap: Record<string, string> = {};
+    companies.forEach(c => { coStatusMap[c.id] = (c as any).status ?? 'Active'; });
+    const latestValByTxn: Record<string, DbValuation> = {};
+    valuations.forEach(v => {
+      if (!(v as any).transaction_id) return;
+      const ex = latestValByTxn[(v as any).transaction_id];
+      if (!ex || v.quarter_end > ex.quarter_end) latestValByTxn[(v as any).transaction_id] = v;
+    });
+    const latestValByCo: Record<string, DbValuation> = {};
+    valuations.forEach(v => {
+      if (!v.company_id) return;
+      const ex = latestValByCo[v.company_id];
+      if (!ex || v.quarter_end > ex.quarter_end) latestValByCo[v.company_id] = v;
+    });
+    const investCountByCo: Record<string, number> = {};
+    txns.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+      investCountByCo[t.company_id!] = (investCountByCo[t.company_id!] ?? 0) + 1;
+    });
+    const map: Record<string, { invested: number; currentValue: number; distributions: number; moic: number }> = {};
+    companies.forEach(co => {
+      const invTxns  = txns.filter(t => t.company_id === co.id && t.type === 'Investment');
+      const distTxns = txns.filter(t => t.company_id === co.id && t.type === 'Distribution');
+      const invested      = invTxns.reduce((s, t) => s + t.amount, 0);
+      const distributions = distTxns.reduce((s, t) => s + t.amount, 0);
+      const isExited = coStatusMap[co.id] === 'Exited' || coStatusMap[co.id] === 'Written Off';
+      const currentValue = isExited ? 0 : invTxns.reduce((sum, t) => {
+        const txnVal = latestValByTxn[t.id];
+        if (txnVal?.value != null) return sum + txnVal.value;
+        const coVal = latestValByCo[co.id];
+        if (coVal?.value != null) {
+          if (investCountByCo[co.id] === 1) return sum + coVal.value;
+          const entryVal = (t as any).valuation_cap ?? null;
+          const companyValue = (coVal as any).company_value ?? 0;
+          return sum + (entryVal && entryVal > 0 && companyValue > 0
+            ? (t.amount / entryVal) * companyValue : t.amount);
+        }
+        return sum + t.amount;
+      }, 0);
+      const moic = invested > 0
+        ? isExited ? distributions / invested : currentValue / invested
+        : 0;
+      map[co.id] = { invested, currentValue, distributions, moic };
+    });
+    return map;
+  }, [companies, txns, valuations]);
 
   // ── KPI totals ────────────────────────────────────────────────
-  const totalInvested      = useMemo(() => companies.reduce((s, c) => s + c.invested, 0), [companies]);
-  const totalCurrentValue  = useMemo(() => companies.reduce((s, c) => s + (c.unrealised || c.invested), 0), [companies]);
-  const totalDistributions = useMemo(() => companies.reduce((s, c) => s + c.distributions, 0), [companies]);
+  const totalInvested      = useMemo(() => Object.values(liveMetrics).reduce((s, m) => s + m.invested, 0), [liveMetrics]);
+  const totalCurrentValue  = useMemo(() => Object.values(liveMetrics).reduce((s, m) => s + m.currentValue, 0), [liveMetrics]);
+  const totalDistributions = useMemo(() => Object.values(liveMetrics).reduce((s, m) => s + m.distributions, 0), [liveMetrics]);
 
   // ── Group by deployment variable ──────────────────────────────
   type GroupRow = {
@@ -117,9 +168,9 @@ export default function PortfolioDeploymentPage() {
       map[key].push(co);
     }
     const rows = Object.entries(map).map(([key, cos]) => {
-      const invested      = cos.reduce((s, c) => s + c.invested, 0);
-      const currentValue  = cos.reduce((s, c) => s + (c.unrealised || c.invested), 0);
-      const distributions = cos.reduce((s, c) => s + c.distributions, 0);
+      const invested      = cos.reduce((s, c) => s + (liveMetrics[c.id]?.invested ?? 0), 0);
+      const currentValue  = cos.reduce((s, c) => s + (liveMetrics[c.id]?.currentValue ?? 0), 0);
+      const distributions = cos.reduce((s, c) => s + (liveMetrics[c.id]?.distributions ?? 0), 0);
       const totalValue    = currentValue + distributions;
       const moic          = invested > 0 ? totalValue / invested : 1;
       const pctOfPortfolio = totalInvested > 0 ? (invested / totalInvested) * 100 : 0;
@@ -131,7 +182,7 @@ export default function PortfolioDeploymentPage() {
   // ── Company table (flat, sorted by invested) ──────────────────
   const sortedCompanies = useMemo(() =>
     [...companies].sort((a, b) => b.invested - a.invested),
-    [companies]
+    [companies, deployVar, liveMetrics]
   );
   const totalPages = Math.ceil(sortedCompanies.length / PER_PAGE);
   const pagedCompanies = sortedCompanies.slice((page - 1) * PER_PAGE, page * PER_PAGE);
@@ -204,7 +255,7 @@ export default function PortfolioDeploymentPage() {
       ...groupedRows.map(r => [r.key, r.companies.length, r.invested, r.currentValue, r.distributions, r.totalValue, `${r.moic.toFixed(2)}x`, `${r.pctOfPortfolio.toFixed(1)}%`]),
       [],
       ['Company', 'Sector', 'Stage', 'Status', 'Invested', 'Current Value', 'Distributions', 'MOIC'],
-      ...sortedCompanies.map(c => [c.name, c.sector ?? '', c.stage ?? '', c.status, c.invested, c.unrealised || c.invested, c.distributions, `${c.moic.toFixed(2)}x`]),
+      ...sortedCompanies.map(c => { const m = liveMetrics[c.id] ?? {}; return [c.name, c.sector ?? '', c.stage ?? '', c.status, m.invested ?? 0, m.currentValue ?? 0, m.distributions ?? 0, `${(m.moic ?? 0).toFixed(2)}x`]; }),
     ];
     const csv  = rows.map(r => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -546,7 +597,7 @@ export default function PortfolioDeploymentPage() {
                 </thead>
                 <tbody className="divide-y divide-[#e8e6df]">
                   {pagedCompanies.map(co => {
-                    const currentValue = co.unrealised || co.invested;
+                    const m = liveMetrics[co.id] ?? { invested: 0, currentValue: 0, distributions: 0, moic: 0 };
                     const groupIdx = groupedRows.findIndex(r => r.key === getGroupKey(co, deployVar));
                     return (
                       <tr key={co.id} className="hover:bg-[#fafaf8] transition-colors">
@@ -561,14 +612,14 @@ export default function PortfolioDeploymentPage() {
                           </div>
                         </td>
                         <td className="px-5 py-3 text-[12px] text-[#6b6860]">{co.stage ?? '—'}</td>
-                        <td className="px-5 py-3 text-right font-mono text-[12.5px] text-[#1a1915]">{fmtFull(co.invested)}</td>
-                        <td className="px-5 py-3 text-right font-mono text-[12.5px] font-medium text-[#1a1915]">{fmtFull(currentValue)}</td>
-                        <td className="px-5 py-3 text-right font-mono text-[12.5px] text-[#6b6860]">{fmtFull(co.distributions)}</td>
+                        <td className="px-5 py-3 text-right font-mono text-[12.5px] text-[#1a1915]">{fmtFull(m.invested)}</td>
+                        <td className="px-5 py-3 text-right font-mono text-[12.5px] font-medium text-[#1a1915]">{fmtFull(m.currentValue)}</td>
+                        <td className="px-5 py-3 text-right font-mono text-[12.5px] text-[#6b6860]">{fmtFull(m.distributions)}</td>
                         <td className="px-5 py-3 text-right">
                           <span className={`font-mono text-[12.5px] font-semibold ${
-                            co.moic > 1 ? 'text-green-600' : co.moic < 1 ? 'text-red-500' : 'text-[#6b6860]'
+                            m.moic > 1 ? 'text-green-600' : m.moic < 1 ? 'text-red-500' : 'text-[#6b6860]'
                           }`}>
-                            {co.moic.toFixed(2)}x
+                            {m.moic.toFixed(2)}x
                           </span>
                         </td>
                         <td className="px-5 py-3">
