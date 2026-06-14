@@ -46,6 +46,15 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
+  // Enforce absolute session max-age regardless of refresh token lifetime.
+  // last_sign_in_at is set by Supabase on every explicit sign-in (magic link click),
+  // not on token refreshes, so this correctly measures time since last real login.
+  const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+  const lastSignIn = user.last_sign_in_at ? new Date(user.last_sign_in_at).getTime() : 0;
+  if (Date.now() - lastSignIn > SESSION_MAX_AGE_MS) {
+    return NextResponse.redirect(new URL('/login?error=session_expired', request.url));
+  }
+
   // Fetch role for this user — don't filter by is_active here,
   // is_active is a display status only; routing is based on role alone.
   const { data: roleData } = await supabase

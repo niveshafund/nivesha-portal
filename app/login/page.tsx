@@ -7,12 +7,15 @@ import { supabase } from '@/lib/supabase';
 
 // Errors that are internal/misleading and should never be shown to users
 const SUPPRESS_ERRORS = ['invalid_hash', 'no_code', 'no_session'];
+const ERROR_MESSAGES: Record<string, string> = {
+  session_expired: 'Your session has expired. Please sign in again.',
+};
 
 function LoginForm() {
   const searchParams = useSearchParams();
   const rawError = searchParams.get('error');
   const authError = rawError && !SUPPRESS_ERRORS.includes(rawError)
-    ? decodeURIComponent(rawError)
+    ? (ERROR_MESSAGES[rawError] ?? decodeURIComponent(rawError))
     : null;
 
   const [email,   setEmail]   = useState('');
