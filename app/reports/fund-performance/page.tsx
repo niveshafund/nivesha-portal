@@ -43,7 +43,23 @@ function currentQuarter(): string {
   return `${m < 3 ? 'Q1' : m < 6 ? 'Q2' : m < 9 ? 'Q3' : 'Q4'} ${y}`;
 }
 
-// ── Metrics calculator ────────────────────────────────────────
+// ── XIRR ─────────────────────────────────────────────────────
+function xirr(cashflows: { date: Date; amount: number }[]): number {
+  if (cashflows.length < 2) return 0;
+  const t0 = cashflows[0].date.getTime();
+  const yrs = (d: Date) => (d.getTime() - t0) / (1000 * 60 * 60 * 24 * 365.25);
+  const npv = (r: number) => cashflows.reduce((s, cf) => s + cf.amount / Math.pow(1 + r, yrs(cf.date)), 0);
+  let lo = -0.999, hi = 10, fLo = npv(lo), fHi = npv(hi);
+  if (fLo * fHi > 0) return 0;
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2, fMid = npv(mid);
+    if (Math.abs(fMid) < 1e-6) return mid * 100;
+    if ((fLo < 0) !== (fMid < 0)) { hi = mid; fHi = fMid; } else { lo = mid; fLo = fMid; }
+  }
+  return ((lo + hi) / 2) * 100;
+}
+
+// ── Metrics calculator — mirrors GP portal logic exactly ──────
 function calcMetrics(
   txns: DbTransaction[],
   companies: DbCompany[],
@@ -53,41 +69,99 @@ function calcMetrics(
 ) {
   const cutoff = new Date(asOfDate);
   const ft = txns.filter(t => new Date(t.date) <= cutoff);
-  const invested      = ft.filter(t => t.type === 'Investment').reduce((s, t) => s + t.amount, 0);
-  const distributions = ft.filter(t => t.type === 'Distribution').reduce((s, t) => s + t.amount, 0);
-  const committed     = lps.reduce((s, lp) => s + lp.commitment, 0);
-  const called        = lps.reduce((s, lp) => s + lp.called, 0);
-  const uncalled      = Math.max(0, committed - called);
 
+  const committed = lps.reduce((s, lp) => s + lp.commitment, 0);
+  const called    = lps.reduce((s, lp) => s + lp.called, 0);
+  const uncalled  = Math.max(0, committed - called);
+
+  // Company status map
+  const coStatusMap: Record<string, string> = {};
+  companies.forEach(c => { coStatusMap[c.id] = (c as any).status ?? 'Active'; });
+
+  // Per-transaction + per-company valuation maps
   const fv = valuations.filter(v => new Date(v.quarter_end) <= cutoff);
-  const latestByCompany: Record<string, DbValuation> = {};
-  for (const v of fv) {
-    if (!v.company_id) continue;
-    const ex = latestByCompany[v.company_id];
-    if (!ex || v.quarter_end > ex.quarter_end) latestByCompany[v.company_id] = v;
-  }
-  const invByCompany: Record<string, number> = {};
-  for (const t of ft.filter(t => t.type === 'Investment')) {
-    if (t.company_id) invByCompany[t.company_id] = (invByCompany[t.company_id] ?? 0) + t.amount;
-  }
-  const portfolioValue = companies.reduce((s, co) => {
-    const lv = latestByCompany[co.id];
-    return s + (lv ? lv.value : (invByCompany[co.id] ?? 0));
-  }, 0);
-  const totalValue = portfolioValue + distributions;
-  const moic = invested > 0 ? totalValue / invested : 1;
-  const dpi  = invested > 0 ? distributions / invested : 0;
+  const latestValByTxn: Record<string, DbValuation> = {};
+  fv.forEach(v => {
+    if (!(v as any).transaction_id) return;
+    const ex = latestValByTxn[(v as any).transaction_id];
+    if (!ex || v.quarter_end > ex.quarter_end) latestValByTxn[(v as any).transaction_id] = v;
+  });
+  const latestValByCo: Record<string, DbValuation> = {};
+  fv.forEach(v => {
+    if (!v.company_id) return;
+    const ex = latestValByCo[v.company_id];
+    if (!ex || v.quarter_end > ex.quarter_end) latestValByCo[v.company_id] = v;
+  });
+  const investCountByCo: Record<string, number> = {};
+  ft.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+    investCountByCo[t.company_id!] = (investCountByCo[t.company_id!] ?? 0) + 1;
+  });
 
-  const firstInv = ft
-    .filter(t => t.type === 'Investment')
-    .sort((a, b) => a.date.localeCompare(b.date))[0];
-  let irr = 0;
-  if (firstInv && invested > 0 && totalValue > 0) {
-    const years = (Date.now() - new Date(firstInv.date).getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-    if (years > 0.1) irr = ((totalValue / invested) ** (1 / years) - 1) * 100;
-  }
+  // Distribution amounts by company (exit proceeds)
+  const distribByCo: Record<string, number> = {};
+  ft.filter(t => t.type === 'Distribution' && t.company_id).forEach(t => {
+    distribByCo[t.company_id!] = (distribByCo[t.company_id!] ?? 0) + t.amount;
+  });
 
-  return { invested, distributions, committed, called, uncalled, portfolioValue, totalValue, moic, dpi, irr };
+  // Realized: Exited + Written Off positions
+  let realizedCost = 0, realizedProceeds = 0;
+  ft.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+    const status = coStatusMap[t.company_id!];
+    if (status === 'Exited' || status === 'Written Off') {
+      realizedCost     += t.amount;
+      realizedProceeds += distribByCo[t.company_id!] ?? 0;
+    }
+  });
+  const realizedGL = realizedProceeds - realizedCost;
+
+  // Unrealized: Active positions only
+  let unrealisedCost = 0, unrealisedCurrentVal = 0;
+  ft.filter(t => t.type === 'Investment' && t.company_id).forEach(t => {
+    const status = coStatusMap[t.company_id!];
+    if (status === 'Exited' || status === 'Written Off') return;
+    const txnVal = latestValByTxn[t.id];
+    const coVal  = latestValByCo[t.company_id!];
+    let currentVal: number;
+    if (txnVal?.value != null) {
+      currentVal = txnVal.value;
+    } else if (coVal?.value != null) {
+      if (investCountByCo[t.company_id!] === 1) {
+        currentVal = coVal.value;
+      } else {
+        const entryVal = (t as any).valuation_cap ?? null;
+        const companyValue = (coVal as any).company_value ?? 0;
+        currentVal = (entryVal && entryVal > 0 && companyValue > 0)
+          ? (t.amount / entryVal) * companyValue : t.amount;
+      }
+    } else {
+      currentVal = t.amount;
+    }
+    unrealisedCost       += t.amount;
+    unrealisedCurrentVal += currentVal;
+  });
+
+  const unrealisedGL    = unrealisedCurrentVal - unrealisedCost;
+  const netUnrealisedGL = unrealisedGL + realizedGL;
+  const portfolioValue  = unrealisedCurrentVal;
+  const invested        = unrealisedCost + realizedCost;
+  const distributions   = Object.values(distribByCo).reduce((s, v) => s + v, 0);
+  const totalValue      = portfolioValue + distributions;
+  const moic            = invested > 0 ? totalValue / invested : 1;
+  const dpi             = invested > 0 ? distributions / invested : 0;
+
+  // XIRR over all cashflows
+  const cfs: { date: Date; amount: number }[] = [];
+  ft.filter(t => t.type === 'Investment').forEach(t => cfs.push({ date: new Date(t.date), amount: -t.amount }));
+  ft.filter(t => t.type === 'Distribution').forEach(t => cfs.push({ date: new Date(t.date), amount: t.amount }));
+  if (portfolioValue > 0) cfs.push({ date: new Date(), amount: portfolioValue });
+  cfs.sort((a, b) => a.date.getTime() - b.date.getTime());
+  const irr = xirr(cfs);
+
+  return {
+    invested, distributions, committed, called, uncalled,
+    portfolioValue, totalValue, moic, dpi, irr,
+    realizedGL, unrealisedGL, netUnrealisedGL,
+  };
 }
 
 // ── Delta helpers ─────────────────────────────────────────────
