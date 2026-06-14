@@ -102,9 +102,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-[#2d5be3] flex items-center justify-center">
-              <span className="text-white text-[13px] font-bold">N</span>
-            </div>
+            <img src="/nivesha-icon.png" alt="Nivesha Ventures" className="w-7 h-7 rounded-[7px] flex-shrink-0 object-contain" />
             <span className="text-[18px] font-semibold text-[#1a1915]">NiveshaVC</span>
           </div>
           <p className="text-[12.5px] text-[#9b9890]">Portfolio Management</p>

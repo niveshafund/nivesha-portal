@@ -61,9 +61,7 @@ function PendingSetupScreen({ email, onSignOut }: { email: string; onSignOut: ()
       {/* Header */}
       <header className="bg-white border-b border-[#eaeaea]">
         <div className="max-w-6xl mx-auto px-6 h-[64px] flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[#2d5be3] flex items-center justify-center flex-shrink-0">
-            <span className="text-white text-[13px] font-bold">N</span>
-          </div>
+          <img src="/nivesha-icon.png" alt="Nivesha Ventures" className="w-7 h-7 rounded-[7px] flex-shrink-0 object-contain" />
           <div className="text-[14px] font-semibold text-[#1a1915]">Investor Portal</div>
           <div className="ml-auto">
             <button
@@ -400,9 +398,7 @@ export default function LPDashboardPage() {
         <div className="max-w-6xl mx-auto px-6 h-[64px] flex items-center gap-4">
           {/* Logo */}
           <div className="flex items-center gap-2 mr-4">
-            <div className="w-8 h-8 rounded-lg bg-[#2d5be3] flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-[13px] font-bold">N</span>
-            </div>
+            <img src="/nivesha-icon.png" alt="Nivesha Ventures" className="w-7 h-7 rounded-[7px] flex-shrink-0 object-contain" />
             <div>
               <div className="text-[14px] font-semibold text-[#1a1915]">Investor Portal</div>
               <div className="text-[11px] text-[#9b9890]">Welcome back, {lp.name.split(' ')[0]}</div>
