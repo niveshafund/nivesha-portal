@@ -518,10 +518,17 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
   // ── Realized / Unrealized Gain-Loss (fully derived from company status + distributions) ──
   const companyMapTop = Object.fromEntries(companies.map(c => [c.id, c]));
   const latestValByTxnTop = valuations.reduce<Record<string, DbValuation>>((acc, v) => {
-    if ((v as any).transaction_id && !acc[(v as any).transaction_id]) acc[(v as any).transaction_id] = v;
+    if (!(v as any).transaction_id) return acc;
+    const existing = acc[(v as any).transaction_id];
+    if (!existing || v.quarter_end > existing.quarter_end) acc[(v as any).transaction_id] = v;
     return acc;
   }, {});
-  const latestValByCompanyTop = valuations.reduce<Record<string, DbValuation>>((acc, v) => { if (v.company_id && !acc[v.company_id]) acc[v.company_id] = v; return acc; }, {});
+  const latestValByCompanyTop = valuations.reduce<Record<string, DbValuation>>((acc, v) => {
+    if (!v.company_id) return acc;
+    const existing = acc[v.company_id];
+    if (!existing || v.quarter_end > existing.quarter_end) acc[v.company_id] = v;
+    return acc;
+  }, {});
   const distribByCompanyTop = txns.filter(t => t.type === 'Distribution' && t.company_id).reduce<Record<string, number>>((acc, t) => { acc[t.company_id!] = (acc[t.company_id!] || 0) + t.amount; return acc; }, {});
 
   let unrealizedCost = 0;       // cost basis of active (not exited/written-off) positions
@@ -562,7 +569,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
 
   // ── Fund-level MOIC / DPI / IRR (computed live from transactions + current valuations) ──
   const totalDistribAll = Object.values(distribByCompanyTop).reduce((s, v) => s + v, 0);
-  const totalCurrentVal = unrealizedCurrentVal + realizedProceeds; // active mark-to-market + cash already returned from realized positions
+  const totalCurrentVal = unrealizedCurrentVal; // exit proceeds reinvested — already in active NAV
   const fundMOIC = totalInvested > 0 ? (totalCurrentVal + 0) / totalInvested : 0;
   // (totalCurrentVal already includes realizedProceeds, so add unrealized-only distributions for DPI)
   const fundDPI  = totalInvested > 0 ? totalDistribAll / totalInvested : 0;
@@ -644,13 +651,14 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
       {tab === 'overview' && (
         <div>
           <p className="text-[12.5px] text-[#6b6860] mb-5">Comprehensive snapshot of your fund's performance and key metrics.</p>
-          <div className="grid grid-cols-5 gap-3 mb-5">
+          <div className="grid grid-cols-6 gap-3 mb-5">
             {[
-              { label: 'Committed Capital',   value: fmtFull(totalCommitted), sub: 'Total LP commitments',         color: '' },
-              { label: 'Invested Capital',    value: fmtFull(totalInvested),  sub: 'Deployed into companies',      color: '' },
-              { label: 'Available Cash',      value: fmtFull(availCash),      sub: 'Called − Admin Fee − Invested + Distributions', color: availCash >= 0 ? 'text-green-600' : 'text-red-600' },
-              { label: 'Admin Fee (Total)',   value: fmtFull(adminFeeTotal),  sub: `${fund.management_fee || 0}% × ${fund.fund_life || 10}yr of called`, color: 'text-amber-600' },
-              { label: 'Outstanding Capital', value: fmtFull(outstandingCap), sub: 'Committed but not yet called', color: 'text-[#6b6860]' },
+              { label: 'Committed Capital',   value: fmtFull(totalCommitted),  sub: 'Total LP commitments',              color: '' },
+              { label: 'Gross Deployed',      value: fmtFull(totalInvested),   sub: 'Total ever invested',               color: '' },
+              { label: 'Active Deployed',     value: fmtFull(unrealizedCost),  sub: 'Excl. exits & write-offs',          color: '' },
+              { label: 'Available Cash',      value: fmtFull(availCash),       sub: 'Called − Fees − Invested + Exits',  color: availCash >= 0 ? 'text-green-600' : 'text-red-600' },
+              { label: 'Admin Fee (Total)',   value: fmtFull(adminFeeTotal),   sub: `${fund.management_fee || 0}% × ${fund.fund_life || 10}yr of called`, color: 'text-amber-600' },
+              { label: 'Outstanding Capital', value: fmtFull(outstandingCap),  sub: 'Committed but not yet called',      color: 'text-[#6b6860]' },
             ].map(k => (
               <div key={k.label} className="bg-white border border-[#e8e6df] rounded-xl p-4">
                 <label className="text-[11px] text-[#6b6860] block mb-1.5">{k.label}</label>
@@ -661,7 +669,7 @@ function FundDetailInner({ params }: { params: Promise<{ id: string }> }) {
           </div>
           <div className="grid grid-cols-4 gap-3 mb-5">
             {(() => {
-              const totalFundValue = unrealizedCurrentVal + realizedProceeds + totalDistributions;
+              const totalFundValue = unrealizedCurrentVal; // exit proceeds were reinvested, already in active NAV
               return [
                 { label: 'Realized Gain/Loss',       value: fmtFull(realizedGainLoss),      sub: 'Distributions − cost basis of Exited/Written Off positions', cls: realizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
                 { label: 'Unrealized Gain/Loss',     value: fmtFull(unrealizedGainLoss),    sub: 'Current value − cost basis of Active positions',              cls: unrealizedGainLoss >= 0 ? 'text-green-600' : 'text-red-600' },
