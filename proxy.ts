@@ -97,6 +97,6 @@ export const config = {
      *                   Supabase can land the user and set cookies)
      *  - /api/*        (API routes handle their own auth)
      */
-    '/((?!_next/static|_next/image|favicon.ico|auth/|api/).*)',
+    '/((?!_next/static|_next/image|favicon.ico|auth/|api/|.*\\.png$|.*\\.svg$|.*\\.ico$|.*\\.jpg$|.*\\.webp$).*)',
   ],
 };
