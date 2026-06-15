@@ -255,7 +255,9 @@ export default function LPReportPage() {
     const lpTxnsSorted = lpTxns
       .filter(t => selectedLPs.some(lp => lp.id === t.lp_id) && new Date(t.date) <= cutoff)
       .sort((a, b) => a.date.localeCompare(b.date));
-    const lpInvested = totalCalled > 0 ? totalCalled : fundMetrics.invested * share;
+    // Invested = Called Capital − Admin Fee (matches GP portal "Net Invested Capital")
+    const lpAdminFee = (fund?.management_fee ?? 0) / 100 * (fund?.fund_life ?? 10) * totalCalled;
+    const lpInvested = totalCalled > 0 ? totalCalled - lpAdminFee : fundMetrics.invested * share;
 
     const moic = lpInvested > 0 ? lpTotalValue / lpInvested : 1;
     const dpi  = lpInvested > 0 ? totalDistributed / lpInvested : 0;
@@ -435,8 +437,8 @@ export default function LPReportPage() {
           const lpCalled   = lp.called;
           const adminFee   = (fund?.management_fee ?? 1) / 100 * (fund?.fund_life ?? 10) * lpCalled;
           const lpPortVal  = fundMetrics.portfolioValue * lpShare;
-          // Use actual LP called capital, not proportional fund total (matches dashboard)
-          const lpInvested = lpCalled > 0 ? lpCalled : fundMetrics.invested * lpShare;
+          // Invested = Called Capital − Admin Fee (matches GP portal "Net Invested Capital")
+          const lpInvested = lpCalled > 0 ? lpCalled - adminFee : fundMetrics.invested * lpShare;
           const lpMOIC     = lpInvested > 0 ? (lpPortVal + lp.distributions) / lpInvested : 1;
 
           const detailRows = [
