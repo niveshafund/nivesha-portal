@@ -248,15 +248,19 @@ export default function LPReportPage() {
     const lpNetUnrealisedGL = fundMetrics.netUnrealisedGL * share;
     // Total value = active NAV + exit proceeds received (not LP distributions which are $0)
     const lpTotalValue      = lpPortfolioValue + (fundMetrics.realizedProceeds * share);
-    const lpInvested        = fundMetrics.invested * share;
+
+    // Use actual LP capital called from LP transactions, NOT proportional fund total.
+    // Proportional estimate (fundMetrics.invested * share) diverges from actual LP
+    // deployment when capital isn't deployed perfectly pro-rata across all LPs.
+    const lpTxnsSorted = lpTxns
+      .filter(t => selectedLPs.some(lp => lp.id === t.lp_id) && new Date(t.date) <= cutoff)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const lpInvested = totalCalled > 0 ? totalCalled : fundMetrics.invested * share;
 
     const moic = lpInvested > 0 ? lpTotalValue / lpInvested : 1;
     const dpi  = lpInvested > 0 ? totalDistributed / lpInvested : 0;
 
-    // XIRR from LP transactions
-    const lpTxnsSorted = lpTxns
-      .filter(t => selectedLPs.some(lp => lp.id === t.lp_id) && new Date(t.date) <= cutoff)
-      .sort((a, b) => a.date.localeCompare(b.date));
+    // XIRR from actual LP capital call transactions
     const cfs: { date: Date; amount: number }[] = [];
     lpTxnsSorted.forEach(t => cfs.push({ date: new Date(t.date), amount: -t.amount }));
     if (lpPortfolioValue > 0) cfs.push({ date: new Date(), amount: lpPortfolioValue });
@@ -431,12 +435,13 @@ export default function LPReportPage() {
           const lpCalled   = lp.called;
           const adminFee   = (fund?.management_fee ?? 1) / 100 * (fund?.fund_life ?? 10) * lpCalled;
           const lpPortVal  = fundMetrics.portfolioValue * lpShare;
-          const lpInvested = fundMetrics.invested * lpShare;
+          // Use actual LP called capital, not proportional fund total (matches dashboard)
+          const lpInvested = lpCalled > 0 ? lpCalled : fundMetrics.invested * lpShare;
           const lpMOIC     = lpInvested > 0 ? (lpPortVal + lp.distributions) / lpInvested : 1;
 
           const detailRows = [
-            ['LP Name', lp.name,           'MOIC',    `${lpMOIC.toFixed(2)}x`],
-            ['Fund Ownership', `${lp.ownership_pct.toFixed(1)}%`, 'IRR', `${lpMetrics.irr.toFixed(1)}%`],
+            ['LP Name', lp.name,           'NET MOIC', `${lpMOIC.toFixed(2)}x`],
+            ['Fund Ownership', `${lp.ownership_pct.toFixed(1)}%`, 'NET IRR', `${lpMetrics.irr.toFixed(1)}%`],
             ['Commitment', fmtFull(lp.commitment), 'DPI', `${lpMetrics.dpi.toFixed(2)}x`],
             ['Capital Called', fmtFull(lpCalled), '', ''],
           ];
@@ -820,12 +825,12 @@ export default function LPReportPage() {
                     <tbody className="divide-y divide-[#f0efe9]">
                       {[
                         {
-                          label: 'MOIC',
+                          label: 'NET MOIC',
                           value: `${lpMetrics.moic.toFixed(2)}x`,
                           color: lpMetrics.moic > 1 ? 'text-[#2d5be3]' : lpMetrics.moic < 1 ? 'text-red-500' : 'text-[#1a1915]',
                         },
                         {
-                          label: 'IRR',
+                          label: 'NET IRR',
                           value: `${lpMetrics.irr.toFixed(1)}%`,
                           color: lpMetrics.irr > 0 ? 'text-green-600' : lpMetrics.irr < 0 ? 'text-red-500' : 'text-[#9b9890]',
                         },
