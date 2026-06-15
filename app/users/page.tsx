@@ -149,6 +149,7 @@ export default function UsersPage() {
   const [editName, setEditName]       = useState('');
   const [editEmail, setEditEmail]     = useState('');
   const [confirmDelete, setConfirmDelete] = useState<TeamMember | null>(null);
+  const [confirmDeactivate, setConfirmDeactivate] = useState<TeamMember | null>(null);
 
   useEffect(() => { loadData(); }, []);
 
@@ -228,8 +229,21 @@ export default function UsersPage() {
     await loadData();
   }
 
-  async function handleDeactivate(m: TeamMember) {
-    await supabase.from('user_roles').update({ is_active: !m.is_active }).eq('id', m.id);
+  function handleDeactivate(m: TeamMember) {
+    if (!m.is_active) {
+      // Reactivate has no destructive consequence — do it directly
+      supabase.from('user_roles').update({ is_active: true }).eq('id', m.id).then(() => loadData());
+    } else {
+      setConfirmDeactivate(m);
+    }
+  }
+
+  async function confirmDoDeactivate() {
+    if (!confirmDeactivate) return;
+    await supabase.from('user_roles').update({ is_active: false }).eq('id', confirmDeactivate.id);
+    setConfirmDeactivate(null);
+    setSuccessMsg(`${confirmDeactivate.full_name ?? 'User'} has been deactivated.`);
+    setTimeout(() => setSuccessMsg(''), 4000);
     await loadData();
   }
 
@@ -581,6 +595,37 @@ export default function UsersPage() {
           </div>
         );
       })()}
+
+      {/* Deactivate confirm modal */}
+      {confirmDeactivate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setConfirmDeactivate(null)}/>
+          <div className="relative bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center flex-shrink-0">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth={2} className="w-5 h-5">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+              </div>
+              <div className="text-[14px] font-semibold">Deactivate LP access?</div>
+            </div>
+            <p className="text-[13px] text-[#6b6860] mb-1">
+              <span className="font-medium text-[#1a1915]">{confirmDeactivate.full_name ?? confirmDeactivate.email}</span> will immediately lose access to the investor portal.
+            </p>
+            <p className="text-[12px] text-[#9b9890] mb-5">You can reactivate them at any time from this page.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmDeactivate(null)}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                Cancel
+              </button>
+              <button onClick={confirmDoDeactivate}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors">
+                Deactivate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete confirm modal */}
       {confirmDelete && (

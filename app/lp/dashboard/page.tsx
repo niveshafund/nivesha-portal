@@ -135,6 +135,46 @@ function PendingSetupScreen({ email, onSignOut }: { email: string; onSignOut: ()
   );
 }
 
+// ─── Deactivated screen ───────────────────────────────────────
+function DeactivatedScreen({ onSignOut }: { onSignOut: () => void }) {
+  return (
+    <div className="min-h-screen bg-[#f5f4f0]">
+      <header className="bg-white border-b border-[#eaeaea]">
+        <div className="max-w-6xl mx-auto px-6 h-[64px] flex items-center gap-3">
+          <img src="/nivesha-icon.png" alt="Nivesha Ventures" className="w-7 h-7 rounded-[7px] flex-shrink-0 object-contain" />
+          <div className="text-[14px] font-semibold text-[#1a1915]">Investor Portal</div>
+          <div className="ml-auto">
+            <button onClick={onSignOut} className="text-[12.5px] text-[#9b9890] hover:text-[#1a1915] transition-colors">
+              Sign out
+            </button>
+          </div>
+        </div>
+      </header>
+      <main className="max-w-6xl mx-auto px-6 py-16">
+        <div className="max-w-lg mx-auto bg-white rounded-2xl border border-[#eaeaea] p-10 text-center">
+          <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-5">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth={1.5} className="w-7 h-7">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <circle cx="12" cy="16" r="0.5" fill="#ef4444"/>
+            </svg>
+          </div>
+          <h2 className="text-[20px] font-bold text-[#1a1915] mb-2">Account deactivated</h2>
+          <p className="text-[13.5px] text-[#6b6860] mb-6 leading-relaxed">
+            Your investor account has been deactivated. Please contact your fund manager to restore access.
+          </p>
+          <button
+            onClick={onSignOut}
+            className="w-full py-2.5 rounded-xl border border-[#e8e6df] text-[13px] font-medium text-[#6b6860] hover:bg-[#f5f4f0] transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
+      </main>
+    </div>
+  );
+}
+
 export default function LPDashboardPage() {
   const router = useRouter();
   const [lp, setLp]             = useState<LP | null>(null);
@@ -175,6 +215,7 @@ export default function LPDashboardPage() {
   }
   // null = still loading, true = no LP record linked yet
   const [pendingSetup, setPendingSetup] = useState(false);
+  const [deactivated, setDeactivated] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -194,6 +235,11 @@ export default function LPDashboardPage() {
       // No LP record yet — show zero pending state instead of redirecting
       if (!lpData) {
         setPendingSetup(true);
+        return;
+      }
+      if (lpData.is_active === false) {
+        await supabase.auth.signOut();
+        setDeactivated(true);
         return;
       }
       setLp(lpData as LP);
@@ -250,6 +296,10 @@ export default function LPDashboardPage() {
         onSignOut={handleSignOut}
       />
     );
+  }
+
+  if (deactivated) {
+    return <DeactivatedScreen onSignOut={handleSignOut} />;
   }
 
   if (!lp || !fund) return (
