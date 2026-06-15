@@ -228,18 +228,24 @@ export default function LPDashboardPage() {
   async function loadData(userId: string) {
     setLoading(true);
     try {
+      // Check user_roles first — RLS blocks deactivated LPs from reading lps table,
+      // so we must detect deactivation before querying lps.
+      const { data: roleData } = await supabase
+        .from('user_roles').select('is_active').eq('user_id', userId).single();
+
+      if (roleData && roleData.is_active === false) {
+        await supabase.auth.signOut();
+        setDeactivated(true);
+        return;
+      }
+
       // Get LP record linked to this user
       const { data: lpData } = await supabase
         .from('lps').select('*').eq('user_id', userId).single();
 
-      // No LP record yet — show zero pending state instead of redirecting
+      // No LP record yet — show pending state
       if (!lpData) {
         setPendingSetup(true);
-        return;
-      }
-      if (lpData.is_active === false) {
-        await supabase.auth.signOut();
-        setDeactivated(true);
         return;
       }
       setLp(lpData as LP);
