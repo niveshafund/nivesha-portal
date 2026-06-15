@@ -111,6 +111,21 @@ async function activateUser(userId: string, email: string) {
   const admin = adminClient();
   const normalizedEmail = email.trim().toLowerCase();
 
+  // Check current is_active — if a GP explicitly deactivated this user,
+  // do NOT flip it back to true on login.
+  const { data: existing } = await admin
+    .from('user_roles')
+    .select('is_active')
+    .eq('user_id', userId)
+    .single();
+
+  if (existing && existing.is_active === false) {
+    // GP deactivated this user — do not reactivate on login
+    console.warn(`[confirm] User ${userId} is deactivated — skipping activation`);
+    await admin.from('pending_invites').delete().eq('email', normalizedEmail);
+    return;
+  }
+
   await admin.from('user_roles').update({ is_active: true }).eq('user_id', userId);
   await admin.from('pending_invites').delete().eq('email', normalizedEmail);
   console.log(`[confirm] Activated user ${userId}`);
