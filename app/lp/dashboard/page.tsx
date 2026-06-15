@@ -27,6 +27,27 @@ function fmt(n: number, compact = false) {
 function pct(n: number) { return (n * 100).toFixed(1) + '%'; }
 function moic(n: number) { return n.toFixed(2) + 'x'; }
 
+// ── XIRR (Newton-Raphson) ─────────────────────────────────────
+function xirr(cashflows: { date: Date; amount: number }[]): number | null {
+  if (cashflows.length < 2) return null;
+  const t0 = cashflows[0].date;
+  let rate = 0.15;
+  for (let i = 0; i < 200; i++) {
+    let f = 0, df = 0;
+    for (const { date, amount } of cashflows) {
+      const t = (date.getTime() - t0.getTime()) / (365.25 * 24 * 3600 * 1000);
+      const v = Math.pow(1 + rate, t);
+      f  += amount / v;
+      df -= t * amount / (v * (1 + rate));
+    }
+    if (Math.abs(df) < 1e-12) break;
+    const next = rate - f / df;
+    if (Math.abs(next - rate) < 1e-8) { rate = next; break; }
+    rate = next;
+  }
+  return isFinite(rate) ? rate : null;
+}
+
 const QUARTERS = ['Q1','Q2','Q3','Q4'];
 function prevQuarter(q: string) {
   const [qt, yr] = [q.slice(0,2), parseInt(q.slice(2))];
@@ -454,6 +475,26 @@ export default function LPDashboardPage() {
   const netMOIC    = totalIn > 0 ? totalValue / totalIn : 0;
   const grossMOIC  = netInvested > 0 ? totalValue / netInvested : 0;
 
+  // Real XIRR using actual LP capital call dates
+  const xirrCfs = [
+    ...txns
+      .filter(t => t.type === 'Capital Call')
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(t => ({ date: new Date(t.date), amount: -(view === 'my-share' ? t.amount : t.amount / share) })),
+    { date: new Date(), amount: totalValue },
+  ];
+  const netIRR   = xirrCfs.length >= 2 ? xirr(xirrCfs) : null;
+  const grossIRR = (() => {
+    const gcfs = [
+      ...txns
+        .filter(t => t.type === 'Capital Call')
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map(t => ({ date: new Date(t.date), amount: -(view === 'my-share' ? t.amount : t.amount / share) })),
+      { date: new Date(), amount: view === 'my-share' ? portfolioValue + distribs : (portfolioValue + distribs) / share },
+    ];
+    return gcfs.length >= 2 ? xirr(gcfs) : null;
+  })();
+
   // Portfolio % gain (vs total paid-in capital)
   const portfolioPctGain = capitalCalled > 0
     ? ((portfolioValue - capitalCalled) / capitalCalled * 100)
@@ -754,7 +795,7 @@ export default function LPDashboardPage() {
               </div>
               <div className="bg-[#f9f8f5] rounded-lg p-3">
                 <div className="text-[10.5px] text-[#9b9890] uppercase tracking-wide mb-1">NET IRR</div>
-                <div className="text-[22px] font-bold">{netMOIC > 1 ? ((netMOIC - 1) * 25).toFixed(1) + '%' : '—'}</div>
+                <div className="text-[22px] font-bold">{netIRR != null ? (netIRR * 100).toFixed(1) + '%' : '—'}</div>
               </div>
             </div>
           </div>
@@ -775,7 +816,7 @@ export default function LPDashboardPage() {
               </div>
               <div className="bg-[#f9f8f5] rounded-lg p-3">
                 <div className="text-[10.5px] text-[#9b9890] uppercase tracking-wide mb-1">GROSS IRR</div>
-                <div className="text-[22px] font-bold">{grossMOIC > 1 ? ((grossMOIC - 1) * 25).toFixed(1) + '%' : '—'}</div>
+                <div className="text-[22px] font-bold">{grossIRR != null ? (grossIRR * 100).toFixed(1) + '%' : '—'}</div>
               </div>
             </div>
           </div>
