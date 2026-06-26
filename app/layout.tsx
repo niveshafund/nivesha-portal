@@ -18,6 +18,10 @@ const dmMono = DM_Mono({
 export const metadata: Metadata = {
   title: 'Nivesha Ventures Portal',
   description: 'Fund management portal for Nivesha Ventures',
+  icons: {
+    icon: '/nivesha-icon.png',
+    apple: '/nivesha-icon.png',
+  },
 };
 
 export default function RootLayout({
