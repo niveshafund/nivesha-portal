@@ -14,8 +14,6 @@ export async function GET(request: NextRequest) {
   const type       = searchParams.get('type') as EmailOtpType | null;
   const next       = searchParams.get('next');
 
-  // Sanitize next to relative paths only — prevents open redirect attacks.
-  // Reject anything that starts with http/https or // (protocol-relative URLs).
   const safeNext = next && /^\/(?!\/)/.test(next) ? next : null;
 
   const cookieStore = await cookies();
@@ -83,10 +81,6 @@ export async function GET(request: NextRequest) {
   return response;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────
-
 function adminClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -111,18 +105,27 @@ async function activateUser(userId: string, email: string) {
   const admin = adminClient();
   const normalizedEmail = email.trim().toLowerCase();
 
-  // Check current is_active — if a GP explicitly deactivated this user,
-  // do NOT flip it back to true on login.
+  // Check current is_active — but ONLY skip reactivation if the user
+  // already has a user_roles row AND was explicitly deactivated (no pending invite).
   const { data: existing } = await admin
     .from('user_roles')
     .select('is_active')
     .eq('user_id', userId)
     .single();
 
-  if (existing && existing.is_active === false) {
-    // GP deactivated this user — do not reactivate on login
-    console.warn(`[confirm] User ${userId} is deactivated — skipping activation`);
-    await admin.from('pending_invites').delete().eq('email', normalizedEmail);
+  // Check if there's still a pending invite — if so, this is first-time onboarding,
+  // always activate regardless of is_active value.
+  const { data: pendingInvite } = await admin
+    .from('pending_invites')
+    .select('email')
+    .eq('email', normalizedEmail)
+    .single();
+
+  const isFirstTimeOnboarding = !!pendingInvite;
+
+  if (existing && existing.is_active === false && !isFirstTimeOnboarding) {
+    // GP explicitly deactivated this user (no pending invite) — do not reactivate
+    console.warn(`[confirm] User ${userId} is deactivated by GP — skipping activation`);
     return;
   }
 
@@ -153,13 +156,15 @@ async function hydrateRoleFromPendingInvite(userId: string, email: string) {
     return;
   }
 
+  // NOTE: Do NOT set is_active here — let activateUser() handle activation.
+  // Setting is_active: false here caused a bug where activateUser() would
+  // think the GP had deactivated the user and skip activation.
   const { error: upsertErr } = await admin.from('user_roles').upsert(
     {
       user_id:    userId,
       role:       invite.role,
       full_name:  invite.full_name ?? null,
       email:      normalizedEmail,
-      is_active:  false,
       invited_by: invite.invited_by ?? null,
     },
     { onConflict: 'user_id' }
@@ -173,24 +178,18 @@ async function hydrateRoleFromPendingInvite(userId: string, email: string) {
   console.log(`[confirm] Role '${invite.role}' hydrated for ${userId}`);
 }
 
-/**
- * When an LP logs in, find their lps record by email and set user_id.
- * This is the missing link between auth.users and the lps table.
- */
 async function linkLpRecord(userId: string, email: string) {
   const admin = adminClient();
   const normalizedEmail = email.trim().toLowerCase();
 
-  // Check if they have an LP role
   const { data: roleData } = await admin
     .from('user_roles')
     .select('role')
     .eq('user_id', userId)
     .single();
 
-  if (roleData?.role !== 'LP') return; // only link for LP users
+  if (roleData?.role !== 'LP') return;
 
-  // Find LP record by email and set user_id if not already set
   const { data: lpData } = await admin
     .from('lps')
     .select('id, user_id')
@@ -202,7 +201,7 @@ async function linkLpRecord(userId: string, email: string) {
     return;
   }
 
-  if (lpData.user_id === userId) return; // already linked
+  if (lpData.user_id === userId) return;
 
   const { error } = await admin
     .from('lps')

@@ -8,7 +8,6 @@ export async function POST(request: Request) {
   const { email, full_name, role } = await request.json();
   if (!email) return NextResponse.json({ error: 'Email required' }, { status: 400 });
 
-  // Validate role — must be a known role, and GPs cannot invite other GPs
   const VALID_ROLES = ['LP', 'Associate', 'Analyst', 'Finance', 'LP Manager', 'Viewer'];
   if (!role || !VALID_ROLES.includes(role)) {
     return NextResponse.json(
@@ -17,7 +16,6 @@ export async function POST(request: Request) {
     );
   }
 
-  // Verify the caller is a GP
   const cookieStore = await cookies();
   const supabaseUser = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -60,15 +58,16 @@ export async function POST(request: Request) {
   const existingUser = existingUsers?.users?.find(u => u.email === normalizedEmail);
 
   if (existingUser) {
-    // User exists in auth — upsert user_roles with is_active: false
-    // They are NOT active until they log in via magic link
+    // User exists in auth — update role and name but do NOT touch is_active.
+    // is_active is managed by auth/confirm (on login) and users API (GP deactivate/reactivate).
+    // Setting is_active: false here would incorrectly deactivate users on re-invite.
     const { error: upsertErr } = await supabaseAdmin.from('user_roles').upsert({
       user_id:    existingUser.id,
       role,
       full_name:  full_name?.trim() || existingUser.user_metadata?.full_name || null,
       email:      normalizedEmail,
-      is_active:  false,          // ← inactive until first login
       invited_by: user.id,
+      // NOTE: is_active intentionally omitted — let auth/confirm handle activation
     }, { onConflict: 'user_id' });
 
     if (upsertErr) {
@@ -76,7 +75,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: upsertErr.message }, { status: 500 });
     }
 
-    // Also save to pending_invites so they show up in the UI
+    // Save to pending_invites so auth/confirm knows this is an onboarding flow
     await supabaseAdmin.from('pending_invites').upsert({
       email:      normalizedEmail,
       full_name:  full_name?.trim() || null,
