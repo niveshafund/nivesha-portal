@@ -27,7 +27,17 @@ type Contact = {
   isPrimary?: boolean;
 };
 
-type Tab = 'company' | 'lp';
+type Tab = 'company' | 'lp' | 'vc';
+
+type VCPartner = {
+  id: string;
+  name: string;
+  firm: string;
+  email?: string;
+  phone?: string;
+  notes?: string;
+  created_at: string;
+};
 
 const inputCls = 'w-full px-3 py-2 rounded-[7px] border border-[#e8e6df] text-[13px] outline-none focus:border-[#2d5be3] focus:ring-2 focus:ring-[#2d5be3]/10 bg-white';
 
@@ -117,6 +127,15 @@ export default function ContactsPage() {
   const [editContact, setEditContact] = useState<Contact | null>(null);
   const [deleteContact, setDeleteContact] = useState<Contact | null>(null);
 
+  // VC Partners state
+  const [vcPartners, setVcPartners] = useState<VCPartner[]>([]);
+  const [showAddVC, setShowAddVC] = useState(false);
+  const [editVC, setEditVC] = useState<VCPartner | null>(null);
+  const [deleteVC, setDeleteVC] = useState<VCPartner | null>(null);
+  const [savingVC, setSavingVC] = useState(false);
+  const [vcForm, setVcForm] = useState({ name: '', firm: '', email: '', phone: '', notes: '' });
+  const [vcSearch, setVcSearch] = useState('');
+
   // Company/LP options for the add form
   const [companies, setCompanies]   = useState<{id: string; name: string; fund_id: string}[]>([]);
   const [lps, setLps]               = useState<{id: string; name: string; fund_id: string}[]>([]);
@@ -128,7 +147,7 @@ export default function ContactsPage() {
 
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); loadVCPartners(); }, []);
 
   async function loadAll() {
     setLoading(true);
@@ -215,6 +234,11 @@ export default function ContactsPage() {
 
     setContacts([...dedupedCompany, ...uniquePrimaryLP, ...dedupedAdditional]);
     setLoading(false);
+  }
+
+  async function loadVCPartners() {
+    const { data } = await supabase.from('vc_partners').select('*').order('firm');
+    setVcPartners(data ?? []);
   }
 
   // Filtered contacts
@@ -429,6 +453,67 @@ export default function ContactsPage() {
     }
   }
 
+  // VC Partner CRUD
+  async function handleSaveVC() {
+    if (!vcForm.name.trim() || !vcForm.firm.trim()) return;
+    setSavingVC(true);
+    try {
+      const payload = {
+        name: vcForm.name.trim(),
+        firm: vcForm.firm.trim(),
+        email: vcForm.email.trim() || null,
+        phone: vcForm.phone.trim() || null,
+        notes: vcForm.notes.trim() || null,
+      };
+      if (editVC) {
+        await supabase.from('vc_partners').update(payload).eq('id', editVC.id);
+      } else {
+        await supabase.from('vc_partners').insert(payload);
+      }
+      setShowAddVC(false);
+      setEditVC(null);
+      setVcForm({ name: '', firm: '', email: '', phone: '', notes: '' });
+      await loadVCPartners();
+      setSuccessMsg(editVC ? 'VC Partner updated' : 'VC Partner added');
+      setTimeout(() => setSuccessMsg(''), 3000);
+    } finally {
+      setSavingVC(false);
+    }
+  }
+
+  async function handleDeleteVC() {
+    if (!deleteVC) return;
+    await supabase.from('vc_partners').delete().eq('id', deleteVC.id);
+    setDeleteVC(null);
+    await loadVCPartners();
+  }
+
+  function openEditVC(v: VCPartner) {
+    setEditVC(v);
+    setVcForm({ name: v.name, firm: v.firm, email: v.email ?? '', phone: v.phone ?? '', notes: v.notes ?? '' });
+    setShowAddVC(true);
+  }
+
+  function handleExportVC() {
+    const rows = filteredVC.map(v => ({
+      'Name': v.name,
+      'Firm': v.firm,
+      'Email': v.email ?? '',
+      'Phone': v.phone ?? '',
+      'Notes': v.notes ?? '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'VC Partners');
+    XLSX.writeFile(wb, 'vc-partners.xlsx');
+  }
+
+  const filteredVC = vcPartners.filter(v => {
+    if (!vcSearch) return true;
+    const q = vcSearch.toLowerCase();
+    return v.name.toLowerCase().includes(q) || v.firm.toLowerCase().includes(q) || v.email?.toLowerCase().includes(q) || false;
+  });
+
   const entityOptions = tab === 'company'
     ? companies.filter(c => !form.fund_id || c.fund_id === form.fund_id)
     : lps.filter(l => !form.fund_id || l.fund_id === form.fund_id);
@@ -458,58 +543,126 @@ export default function ContactsPage() {
         <div className="px-6 py-3 border-b border-[#e8e6df] flex items-center gap-3 flex-wrap">
           {/* Tabs */}
           <div className="flex gap-1 bg-[#f9f8f5] rounded-[8px] p-1">
-            {(['company', 'lp'] as Tab[]).map(t => (
+            {(['company', 'lp', 'vc'] as Tab[]).map(t => (
               <button key={t} onClick={() => setTab(t)}
                 className={`px-3 py-1.5 rounded-[6px] text-[12.5px] font-medium transition-colors ${tab === t ? 'bg-white shadow-sm text-[#1a1915]' : 'text-[#6b6860] hover:text-[#1a1915]'}`}>
-                {t === 'company' ? '🏢 Portfolio Company Contacts' : '👥 Investor (LP) Contacts'}
+                {t === 'company' ? '🏢 Portfolio Company Contacts' : t === 'lp' ? '👥 Investor (LP) Contacts' : '🤝 VC Partners'}
               </button>
             ))}
           </div>
 
-          {/* Fund filter */}
-          <select value={fundFilter} onChange={e => setFundFilter(e.target.value)}
-            className="px-3 py-1.5 rounded-[7px] border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3] bg-white">
-            <option value="all">All Funds</option>
-            {funds.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
+          {/* Fund filter — hidden for VC tab */}
+          {tab !== 'vc' && (
+            <select value={fundFilter} onChange={e => setFundFilter(e.target.value)}
+              className="px-3 py-1.5 rounded-[7px] border border-[#e8e6df] text-[12.5px] outline-none focus:border-[#2d5be3] bg-white">
+              <option value="all">All Funds</option>
+              {funds.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          )}
 
           {/* Search */}
           <div className="flex items-center gap-1.5 bg-[#f9f8f5] border border-[#e8e6df] rounded-[7px] px-3 h-8 flex-1 max-w-[260px]">
             <svg className="w-3 h-3 text-[#9b9890] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
+            <input type="text" placeholder="Search..."
+              value={tab === 'vc' ? vcSearch : search}
+              onChange={e => tab === 'vc' ? setVcSearch(e.target.value) : setSearch(e.target.value)}
               className="border-none bg-transparent outline-none text-[12.5px] w-full placeholder:text-[#9b9890]" />
           </div>
 
           <div className="ml-auto flex items-center gap-2">
-            <button onClick={handleExport}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
-              Export
-            </button>
-            {canWrite && (
+            {tab === 'vc' ? (
               <>
-                <button onClick={() => { setShowImport(true); setImportError(''); setImportFile(null); }}
+                <button onClick={handleExportVC}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                   </svg>
-                  Import
+                  Export
                 </button>
-                <button onClick={() => { setShowAdd(true); setEditContact(null); resetForm(); }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">
-                  + Add
+                {canWrite && (
+                  <button onClick={() => { setShowAddVC(true); setEditVC(null); setVcForm({ name: '', firm: '', email: '', phone: '', notes: '' }); }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">
+                    + Add VC Partner
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <button onClick={handleExport}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                  Export
                 </button>
+                {canWrite && (
+                  <>
+                    <button onClick={() => { setShowImport(true); setImportError(''); setImportFile(null); }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                      </svg>
+                      Import
+                    </button>
+                    <button onClick={() => { setShowAdd(true); setEditContact(null); resetForm(); }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] transition-colors">
+                      + Add
+                    </button>
+                  </>
+                )}
               </>
             )}
           </div>
         </div>
 
         {/* Table */}
-        {loading ? (
+        {tab === 'vc' ? (
+          filteredVC.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-14 text-center">
+              <div className="text-2xl mb-2">🤝</div>
+              <div className="text-[13.5px] font-medium mb-1">No VC partners yet</div>
+              <p className="text-[12.5px] text-[#9b9890]">Add VC firms you collaborate with for deal sharing</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-[#e8e6df] bg-[#fafaf8]">
+                    {['Name', 'Firm', 'Email', 'Phone', 'Notes', 'Actions'].map(h => (
+                      <th key={h} className="text-left text-[11px] font-semibold text-[#9b9890] tracking-wide px-4 py-3">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#e8e6df]">
+                  {filteredVC.map(v => (
+                    <tr key={v.id} className="hover:bg-[#fafaf8] transition-colors">
+                      <td className="px-4 py-3 text-[13px] font-medium">{v.name}</td>
+                      <td className="px-4 py-3 text-[13px] text-[#6b6860]">{v.firm}</td>
+                      <td className="px-4 py-3 text-[13px] text-[#2d5be3]">
+                        {v.email ? <a href={`mailto:${v.email}`} className="hover:underline">{v.email}</a> : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-[13px]">{v.phone ?? '—'}</td>
+                      <td className="px-4 py-3 text-[12px] text-[#9b9890] max-w-[180px] truncate">{v.notes ?? '—'}</td>
+                      <td className="px-4 py-3">
+                        {canWrite && (
+                          <RowActionsMenu
+                            onEdit={() => openEditVC(v)}
+                            onDelete={() => setDeleteVC(v)}
+                          />
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="px-4 py-2.5 border-t border-[#e8e6df] bg-[#fafaf8] text-[11.5px] text-[#9b9890]">
+                {filteredVC.length} partner{filteredVC.length !== 1 ? 's' : ''}
+              </div>
+            </div>
+          )
+        ) : loading ? (
           <div className="flex items-center justify-center py-12 text-[#9b9890] text-[13px]">Loading…</div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-14 text-center">
@@ -573,6 +726,74 @@ export default function ContactsPage() {
           </div>
         )}
       </div>
+
+      {/* VC Partner Add/Edit Modal */}
+      {showAddVC && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/30" onClick={() => { setShowAddVC(false); setEditVC(null); }}/>
+          <div className="relative bg-white rounded-2xl shadow-xl p-6 max-w-lg w-full mx-4">
+            <div className="text-[15px] font-semibold mb-4">{editVC ? 'Edit VC Partner' : 'Add VC Partner'}</div>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="block text-[11.5px] font-medium mb-1">Contact Name *</label>
+                <input value={vcForm.name} onChange={e => setVcForm(f => ({...f, name: e.target.value}))}
+                  placeholder="Jane Smith" className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-[11.5px] font-medium mb-1">VC Firm Name *</label>
+                <input value={vcForm.firm} onChange={e => setVcForm(f => ({...f, firm: e.target.value}))}
+                  placeholder="Sequoia Capital" className={inputCls} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="block text-[11.5px] font-medium mb-1">Email</label>
+                <input type="email" value={vcForm.email} onChange={e => setVcForm(f => ({...f, email: e.target.value}))}
+                  placeholder="jane@sequoia.com" className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-[11.5px] font-medium mb-1">Phone</label>
+                <input value={vcForm.phone} onChange={e => setVcForm(f => ({...f, phone: e.target.value}))}
+                  placeholder="+1 555 000 0000" className={inputCls} />
+              </div>
+            </div>
+            <div className="mb-3">
+              <label className="block text-[11.5px] font-medium mb-1">Notes</label>
+              <input value={vcForm.notes} onChange={e => setVcForm(f => ({...f, notes: e.target.value}))}
+                placeholder="e.g. Focus: SaaS, Series A" className={inputCls} />
+            </div>
+            <div className="flex gap-2 justify-end mt-4">
+              <button onClick={() => { setShowAddVC(false); setEditVC(null); }}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleSaveVC} disabled={savingVC || !vcForm.name.trim() || !vcForm.firm.trim()}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] font-medium bg-[#2d5be3] text-white hover:bg-[#2450cc] disabled:opacity-60 transition-colors">
+                {savingVC ? 'Saving…' : editVC ? 'Update' : 'Add VC Partner'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VC Partner Delete confirm */}
+      {deleteVC && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setDeleteVC(null)}/>
+          <div className="relative bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
+            <div className="text-[14px] font-semibold mb-2">Remove VC Partner?</div>
+            <p className="text-[13px] text-[#6b6860] mb-5">
+              Remove <span className="font-medium">{deleteVC.name}</span> from {deleteVC.firm}? This cannot be undone.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteVC(null)}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] border border-[#e8e6df] bg-white hover:bg-[#f9f8f5] transition-colors">Cancel</button>
+              <button onClick={handleDeleteVC}
+                className="px-4 py-2 rounded-[8px] text-[12.5px] font-medium bg-red-500 text-white hover:bg-red-600 transition-colors">Remove</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add/Edit Modal */}
       {showAdd && (
