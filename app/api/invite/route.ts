@@ -75,6 +75,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: upsertErr.message }, { status: 500 });
     }
 
+    // Confirm email for existing users too — magic link requires confirmed email
+    if (!existingUser.email_confirmed_at) {
+      await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
+        email_confirm: true,
+      });
+      console.log('[invite] Auto-confirmed email for existing user:', normalizedEmail);
+    }
+
     // Save to pending_invites so auth/confirm knows this is an onboarding flow
     await supabaseAdmin.from('pending_invites').upsert({
       email:      normalizedEmail,
@@ -109,6 +117,18 @@ export async function POST(request: Request) {
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+  // Auto-confirm email so magic link works immediately.
+  // Portal is invite-only — GP verified the email by typing it manually.
+  // Magic link proves email ownership on every login anyway.
+  const { data: newUsers } = await supabaseAdmin.auth.admin.listUsers();
+  const newUser = newUsers?.users?.find(u => u.email === normalizedEmail);
+  if (newUser) {
+    await supabaseAdmin.auth.admin.updateUserById(newUser.id, {
+      email_confirm: true,
+    });
+    console.log('[invite] Auto-confirmed email for new user:', normalizedEmail);
+  }
 
   // Audit log
   await supabaseAdmin.from('audit_logs').insert({
