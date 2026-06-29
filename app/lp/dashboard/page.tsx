@@ -496,8 +496,10 @@ export default function LPDashboardPage() {
   })();
 
   // Portfolio % gain (vs total paid-in capital)
-  const portfolioPctGain = capitalCalled > 0
-    ? ((portfolioValue - capitalCalled) / capitalCalled * 100)
+  // Must use view-consistent capital: fund total when in fund-total view, LP share when in my-share view
+  const pctGainDenominator = view === 'my-share' ? capitalCalled : fundTotalCalled;
+  const portfolioPctGain = pctGainDenominator > 0
+    ? ((portfolioValue - pctGainDenominator) / pctGainDenominator * 100)
     : 0;
 
   // ── Chart: sort by quarter_end date ascending ──
