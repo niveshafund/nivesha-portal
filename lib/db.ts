@@ -247,7 +247,19 @@ export async function createLP(lp: Omit<DbLP, 'id' | 'created_at' | 'updated_at'
     .select()
     .single();
   if (error) throw error;
-  return data;
+
+  // Recalc everyone's ownership_pct now that the fund's total commitment changed.
+  // (The caller may have pre-computed a value for this new LP, but this makes it
+  // authoritative and also fixes every *other* LP's now-stale percentage.)
+  await recalculateLPOwnership(data.fund_id);
+  await recalculateFundMetrics(data.fund_id);
+
+  // Re-fetch: the insert's own RETURNING snapshot was captured before the
+  // recalculation above ran, so it still holds the pre-recalc ownership_pct.
+  // Callers (like the LP edit page) rely on the returned row being accurate
+  // immediately, without needing a manual reload.
+  const fresh = await getLPById(data.id);
+  return fresh ?? data;
 }
 
 export async function updateLP(id: string, updates: Partial<DbLP>): Promise<DbLP> {
@@ -258,12 +270,51 @@ export async function updateLP(id: string, updates: Partial<DbLP>): Promise<DbLP
     .select()
     .single();
   if (error) throw error;
+
+  // Commitment changed → every LP's share of the fund shifted, not just this one.
+  // Keep ownership_pct and the fund-level committed/called totals in sync automatically
+  // so nobody has to remember to do this by hand after a commitment edit.
+  if (updates.commitment !== undefined) {
+    await recalculateLPOwnership(data.fund_id);
+    await recalculateFundMetrics(data.fund_id);
+
+    // Re-fetch: the update's own RETURNING snapshot was captured before the
+    // recalculation above ran, so `data.ownership_pct` here is still the
+    // pre-recalc value. Return the fresh row so callers display the correct
+    // % of Fund immediately, without needing a manual page reload.
+    const fresh = await getLPById(id);
+    return fresh ?? data;
+  }
+
   return data;
 }
 
 export async function deleteLP(id: string): Promise<void> {
+  // Grab fund_id before the row is gone so we can recalc what's left
+  const lp = await getLPById(id);
   const { error } = await supabase.from('lps').delete().eq('id', id);
   if (error) throw error;
+  if (lp) {
+    await recalculateLPOwnership(lp.fund_id);
+    await recalculateFundMetrics(lp.fund_id);
+  }
+}
+
+// Recompute every LP's % of Fund for a given fund based on current commitments.
+// Call this any time an LP is added, removed, or has its commitment changed —
+// ownership_pct is a stored snapshot, not a live-computed value, so it goes
+// stale unless something explicitly refreshes it.
+export async function recalculateLPOwnership(fundId: string): Promise<void> {
+  const lps = await getLPsByFund(fundId);
+  const totalCommitted = lps.reduce((s, lp) => s + lp.commitment, 0);
+  await Promise.all(
+    lps.map(lp => {
+      const pct = totalCommitted > 0 ? (lp.commitment / totalCommitted) * 100 : 0;
+      // Skip the write if it wouldn't meaningfully change — avoids needless updates
+      if (Math.abs(pct - lp.ownership_pct) < 0.0001) return Promise.resolve(null as any);
+      return supabase.from('lps').update({ ownership_pct: pct }).eq('id', lp.id);
+    })
+  );
 }
 
 // ─── LP TRANSACTIONS ─────────────────────────────────────────

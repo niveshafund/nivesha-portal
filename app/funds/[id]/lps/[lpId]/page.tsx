@@ -217,14 +217,23 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
 
   const handleSave = async () => {
     if (!form.name.trim()) return;
+
+    // Guard against an accidental blank/zero/negative commitment silently
+    // wiping out an LP's real commitment amount.
+    const commitmentNum = Number(form.commitment);
+    if (!form.commitment.trim() || isNaN(commitmentNum) || commitmentNum <= 0) {
+      setSaveError('Enter a valid, positive commitment amount.');
+      return;
+    }
+
     setSaving(true); setSaveError(null);
     try {
-      const updated = await updateLP(lpId, {
+      await updateLP(lpId, {
         name:          form.name.trim(),
         email:         form.email || undefined,
         phone:         form.phone || undefined,
         type:          form.type as any,
-        commitment:    Number(form.commitment),
+        commitment:    commitmentNum,
         join_date:     form.joinDate || undefined,
         address_line1: form.addressLine1 || undefined,
         address_line2: form.addressLine2 || undefined,
@@ -237,7 +246,12 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
                          : form.notes || undefined,
         gp_contact:    form.gp_contact || undefined,
       });
-      setLP(updated);
+      // Re-fetch from the DB rather than trusting updateLP's own return value.
+      // When commitment changes, ownership_pct is recalculated server-side
+      // (via lib/db.ts and/or a DB trigger) in a follow-up statement — a
+      // stale snapshot from the initial UPDATE's RETURNING clause would show
+      // the old % of Fund until the next manual page reload otherwise.
+      await load();
       setEditing(false);
     } catch (err: any) {
       setSaveError(err.message ?? 'Failed to save');
@@ -538,6 +552,9 @@ export default function LPDetailPage({ params }: { params: Promise<{ id: string;
               <div>
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Commitment ($)</label>
                 <input type="number" value={form.commitment} onChange={set('commitment')} className={inputCls} />
+                <p className="text-[11px] text-[#9b9890] mt-1">
+                  Changing this recalculates % of Fund for every LP in this fund on save.
+                </p>
               </div>
               <div>
                 <label className="block text-[12px] font-medium text-[#9b9890] mb-1">Address Line 1</label>
